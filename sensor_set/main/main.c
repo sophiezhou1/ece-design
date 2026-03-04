@@ -135,7 +135,7 @@ void app_main(void)
     static adc_continuous_data_t parsed_data[1024 / SOC_ADC_DIGI_RESULT_BYTES];
 
     // Print at ~10 Hz by decimating samples
-    const uint32_t DECIM_N = 40;      // for 2000 Hz, DECIM_N = 200 -> 10 Hz
+    const uint32_t DECIM_N = 20;      // for 2000 Hz, DECIM_N = 200 -> 10 Hz
     static uint32_t decim = 0;
 
     

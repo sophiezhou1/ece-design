@@ -16,8 +16,14 @@ import filter_and_derive
 HISTORY_MAX = 5000
 history = deque(maxlen=HISTORY_MAX)
 
-MA_N = 25
+# update to reduce lag, lower N = less lag
+# N is the number of samples to gather and apply one filter to
+# alt: increase sample rate or decrease decimation in mcu/main.c
+MA_N = 10
+MED_N = 3
+med_adc = filter_and_derive.MedianFilter(MED_N)
 ma_adc = filter_and_derive.MovingAverage(MA_N)
+med_tc = filter_and_derive.MedianFilter(MED_N)
 ma_tc  = filter_and_derive.MovingAverage(MA_N)
 
 # structs
@@ -158,8 +164,10 @@ def main():
             # [2] with moving avg filtering
             sample = sensor_data(t_us, temp, tc) # adc is preprocessed temp
             history.append(sample)
-            temp_avg = ma_adc.update(temp)
-            tc_avg = ma_tc.update(tc)
+            temp_med = med_adc.update(temp)
+            temp_avg = ma_adc.update(temp_med)
+            tc_med = med_tc.update(tc)
+            tc_avg = ma_tc.update(tc_med)
             print(f"{temp_avg:.2f} {tc_avg:.2f}")
             plot.update_plot(t_us, temp_avg, tc_avg)
 
