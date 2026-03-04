@@ -1,5 +1,3 @@
-#test commit
-
 import time
 import serial
 from serial.tools import list_ports
@@ -12,14 +10,24 @@ import matplotlib.pyplot as plt
 from collections import deque
 
 import plot
+import filter_and_derive
 
+# buffer
+HISTORY_MAX = 5000
+history = deque(maxlen=HISTORY_MAX)
 
+MA_N = 25
+ma_adc = filter_and_derive.MovingAverage(MA_N)
+ma_tc  = filter_and_derive.MovingAverage(MA_N)
+
+# structs
 @dataclass
 class sensor_data:
     t_us: int
     adc: int
     tc: float
 
+# serial params
 BAUD = 115200
 TIMEOUT_S = 1.0
 
@@ -29,6 +37,8 @@ PORT_HINTS = [
     "/dev/cu.wchusbserial",    # CH34x
     "/dev/cu.usbmodem",        # some dev boards
 ]
+
+
 
 def find_port() -> str | None:
     ports = list(list_ports.comports())
@@ -118,7 +128,7 @@ def thermistor_conv(raw):
     Tinv = A + B * math.log(rth) + C * (math.log(rth)) ** 3
     T = Tinv ** -1
     T -= 273.15
-    return T
+    return T #ºC
 
     # return c_to_f(T)
     # return vout
@@ -142,11 +152,16 @@ def main():
             temp = thermistor_conv(adc)
 
             # [1] non-filtered outputs
-            print(f"{temp:.2f} {tc:.2f}")
-            plot.update_plot(t_us, temp, tc)
+            # print(f"{temp:.2f} {tc:.2f}")
+            # plot.update_plot(t_us, temp, tc)
 
-            # data = sensor_data(t_us, temp, tc) # adc is preprocessed temp
-
+            # [2] with moving avg filtering
+            sample = sensor_data(t_us, temp, tc) # adc is preprocessed temp
+            history.append(sample)
+            temp_avg = ma_adc.update(temp)
+            tc_avg = ma_tc.update(tc)
+            print(f"{temp_avg:.2f} {tc_avg:.2f}")
+            plot.update_plot(t_us, temp_avg, tc_avg)
 
         except serial.SerialException as e:
             print(f"Serial error: {e}")
