@@ -1,0 +1,1 @@
+# variance from filter and derive for stability
