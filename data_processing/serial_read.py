@@ -28,6 +28,7 @@ ma_tc  = filter_and_derive.MovingAverage(MA_N)
 
 # linear regression
 linreg = filter_and_derive.MovingLinearRegression(50, 50)
+var = filter_and_derive.MovingVariance(50, 50)
 
 # structs
 @dataclass
@@ -186,6 +187,10 @@ def main():
 
             try:
                 (t_us, adc, _, tc, fault, fault_oc, fault_scg, fault_scv) = parse_line(text)
+                properties.fault = fault
+                properties.fault_oc = fault_oc
+                properties.fault_scg = fault_scg
+                properties.fault_scv = fault_scv
             except:
                 continue
             temp = thermistor_conv(adc)
@@ -209,11 +214,15 @@ def main():
             if slope is None:
                 continue
             # ºC/min
-            properties.slope = slope * 60
+            properties.slope = slope * 60 # caluculates slope every sample, print out to display at lower rate
             # print(properties.slope)
 
-            
-
+            # [4] temp var
+            variance = var.update(temp_avg)
+            if variance is None:
+                continue
+            properties.var = variance
+            # print(properties.var)
 
 
         except serial.SerialException as e:

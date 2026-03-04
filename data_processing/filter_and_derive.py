@@ -9,7 +9,6 @@ filters:
 features:
     indicate temp increase rate
     variance
-    time to target temp prediction
 """
 
 
@@ -88,3 +87,40 @@ class MovingLinearRegression:
 
         slope = (self.n * self.sum_xy - self.sum_x * self.sum_y) / denom
         return slope
+    
+class MovingVariance:
+    def __init__(self, window_size, min_points = 2):
+        self.Nmax = window_size
+        self.min_points = min_points
+
+        self.buf = deque(maxlen=window_size)
+
+        self.n = 0
+        self.sum_x = 0.0
+        self.sum_x2 = 0.0
+
+    def reset(self):
+        self.buf.clear()
+        self.n = 0
+        self.sum_x = 0.0
+        self.sum_x2 = 0.0
+
+    def update(self, x):
+        if self.n == self.Nmax:
+            x0 = self.buf[0]
+            self.sum_x -= x0
+            self.sum_x2 -= x0 * x0
+        else:
+            self.n += 1
+
+        self.buf.append(x)
+
+        self.sum_x += x
+        self.sum_x2 += x * x
+
+        if self.n < self.min_points:
+            return None
+
+        mean = self.sum_x / self.n
+        var = (self.sum_x2 / self.n) - mean * mean
+        return var
