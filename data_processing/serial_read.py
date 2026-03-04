@@ -26,6 +26,9 @@ ma_adc = filter_and_derive.MovingAverage(MA_N)
 med_tc = filter_and_derive.MedianFilter(MED_N)
 ma_tc  = filter_and_derive.MovingAverage(MA_N)
 
+# linear regression
+linreg = filter_and_derive.MovingLinearRegression(50, 50)
+
 # structs
 @dataclass
 class sensor_data:
@@ -33,15 +36,35 @@ class sensor_data:
     adc: int
     tc: float
 
+@dataclass
+class Properties:
+    fault: int = -1
+
+    fault_oc: int = -1
+    fault_scg: int = -1
+    fault_scv: int = -1
+    fault_drop: int = -1
+    fault_probe_dc: int = -1
+    fault_tc_dc: int = -1
+
+    warn_overtemp: int = -1
+
+    slope: float = math.nan
+    var: float = math.nan
+    time_remain: float = -1
+    curr_state: str | None = None
+
+properties = Properties()
+
 # serial params
 BAUD = 115200
 TIMEOUT_S = 1.0
 
 PORT_HINTS = [
-    "/dev/cu.usbserial",   # common USB-serial adapters
-    "/dev/cu.SLAB_USBtoUART",  # CP210x
-    "/dev/cu.wchusbserial",    # CH34x
-    "/dev/cu.usbmodem",        # some dev boards
+    "/dev/cu.usbserial",
+    "/dev/cu.SLAB_USBtoUART",
+    "/dev/cu.wchusbserial",
+    "/dev/cu.usbmodem",
 ]
 
 
@@ -89,7 +112,10 @@ def parse_line(line: str):
         scg_match = re.search(r"SCG=(\d+)", rest)
         scv_match = re.search(r"SCV=(\d+)", rest)
 
-        if not all([raw_match, tc_match, fault_match, oc_match, scg_match, scv_match]):
+        if not all([adc_match, raw_match, tc_match, fault_match, oc_match, scg_match, scv_match]):
+            # print(raw_match, tc_match, fault_match, oc_match, scg_match, scv_match)
+            # print("bc of match")
+            # print(line)
             return None
 
         adc = int(adc_match.group(1))
@@ -109,7 +135,10 @@ def parse_line(line: str):
                 fault_scg,
                 fault_scv)
 
-    except Exception:
+    except Exception as e:
+        # print('bc of exception')
+        # print(line)
+        # print(e)
         return None
     
 
@@ -142,6 +171,7 @@ def thermistor_conv(raw):
 
 
 def main():
+    global med_adc, med_tc, ma_adc, ma_tc, properties, linreg
     ser_conn = open_serial()
 
     while True:
@@ -154,7 +184,10 @@ def main():
             if not text:
                 continue
 
-            (t_us, adc, _, tc, fault, fault_oc, fault_scg, fault_scv) = parse_line(text)
+            try:
+                (t_us, adc, _, tc, fault, fault_oc, fault_scg, fault_scv) = parse_line(text)
+            except:
+                continue
             temp = thermistor_conv(adc)
 
             # [1] non-filtered outputs
@@ -171,6 +204,18 @@ def main():
             print(f"{temp_avg:.2f} {tc_avg:.2f}")
             plot.update_plot(t_us, temp_avg, tc_avg)
 
+            # [3] temp slope
+            slope = linreg.update(t_us * 1e-6, temp_avg)
+            if slope is None:
+                continue
+            # ºC/min
+            properties.slope = slope * 60
+            # print(properties.slope)
+
+            
+
+
+
         except serial.SerialException as e:
             print(f"Serial error: {e}")
             try:
@@ -183,16 +228,28 @@ def main():
 
         except KeyboardInterrupt:
             try:
+                # close connection
                 ser_conn.close()
+
+                # reset graph
                 plot._t_buf.clear()
                 plot._raw_buf.clear()
                 plot._tc_buf.clear()
-
                 _t0 = None
-
                 plot._line_raw.set_data([], [])
                 plot._line_tc.set_data([], [])
 
+                # clear buffers for filters
+                history.clear()
+                med_adc = filter_and_derive.MedianFilter(MED_N)
+                ma_adc = filter_and_derive.MovingAverage(MA_N)
+                med_tc = filter_and_derive.MedianFilter(MED_N)
+                ma_tc  = filter_and_derive.MovingAverage(MA_N)
+
+                # clear linear regression
+                linreg.reset()
+
+                # close all
                 plt.close('all')
             except Exception:
                 pass

@@ -1,8 +1,7 @@
 """
 over temp monitor w timer latch
-dropout detection
-    range checks (for sensor dropout)
-    probe disconnect reading invalid if dropout?
-    thermocouple temp low/unchanging if heat on
-servo safe shutdown
+dropout detection: range checks
+    probe dc (adc == 4095)
+    thermocouple dc (tc == 0 and internal == 0)
+servo safe shutdown -- event detection markers for overtemp
 """
