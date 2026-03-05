@@ -1,4 +1,5 @@
 # NOTE: UPDATING THE GRAPH INCREASES DELAY SIGNIFICANTLY
+import sys
 
 import time
 import serial
@@ -17,6 +18,28 @@ import plot
 import filter_and_derive
 import fault_detection
 import fsm
+
+
+
+
+
+def _fmt_mmss(sec: float) -> str:
+    sec_i = max(0, int(sec + 0.5))
+    m = sec_i // 60
+    s = sec_i % 60
+    return f"{m:02d}:{s:02d}"
+
+def _countdown_line(label: str, remaining_s: float) -> None:
+    sys.stdout.write("\r" + f"[TIMER_MODE] {label} remaining {_fmt_mmss(remaining_s)}" + " " * 10)
+    sys.stdout.flush()
+
+def _status_line(pan_c, internal_c):
+    msg = (f"pan={pan_c:5.2f}C  internal={internal_c:5.2f}C")
+
+    sys.stdout.write("\r" + msg + " " * 10)
+    sys.stdout.flush()
+
+
 
 # buffer
 HISTORY_MAX = 5000
@@ -184,9 +207,28 @@ def thermistor_conv(raw):
 def main():
     global med_adc, med_tc, ma_adc, ma_tc, properties, linreg
     ser_conn = open_serial()
-    cfg = fault_detection.ThresholdConfig(overtemp_set=100, overtemp_clr=98, overtemp_trip_time=0.5)
+    cfg = fault_detection.ThresholdConfig(overtemp_set=40, overtemp_clr=38, overtemp_trip_time=0.5)
     monitor = fault_detection.FaultMonitor(cfg)
-    fsm_sys = fsm.FSM(target_pan_temp_c=30)
+
+
+    started = False
+    flip_sent = False
+    prev_overtemp = 0
+
+    timer_mode = False
+    deadline_s = None
+    deadline_label = ""
+
+    PREHEAT_TARGET_C = 30.0
+    FLIP_PAN_C       = 40.0
+    INTERNAL_TARGET_C = 50.0
+
+    # time-based durations
+    SEAR_SIDE_S = 10.0   # 3 min
+    REST_S      = 10.0   # 5 min
+
+    fsm_sys = fsm.FSM(target_pan_temp_c=PREHEAT_TARGET_C)
+
 
     while True:
         try:
@@ -256,20 +298,19 @@ def main():
             # if flags.timer_mode:
             #     fault_strings.append("TIMER_MODE")
 
-            temp = 0.9357 * temp + 0.2049
-            print(f"{temp:.2f} {tc:.2f}")
+            # print(f"{temp:.2f} {tc:.2f}")
             fault_detection.apply_fault_flags(properties, flags)
             if properties.fault_probe_dc == 1:
                 fault_strings.append("PROBE_DISCONNECT")
             if properties.fault_tc_dc == 1:
                 fault_strings.append("THERMOCOUPLE_DISCONNECT")
             # if properties.fault_probe_dc == 1 or properties.fault_tc_dc == 1:
-            #     print("switching to time-based instructions")
+                # print("switching to time-based instructions")
             if properties.warn_overtemp == 1:
                 fault_strings.append("OVERTEMP")
                 # print("decreasing knob rotation")
 
-            print(",".join(fault_strings))
+            # print(",".join(fault_strings))
 
             # [6] sample fsm
             # start in IDLE
@@ -298,6 +339,135 @@ def main():
             #     time.sleep(5)
             #     fsm_sys.dispatch(fsm.EventMsg(fsm.Event.RESET)) # to IDLE
             #     break
+
+
+            # Decide "connectivity" from persistent fault flags
+            # (fault_detection.apply_fault_flags(properties, flags) already ran above)
+            probe_connected = (properties.fault_probe_dc != 1)
+            tc_connected    = (properties.fault_tc_dc != 1)
+
+            # Timer mode if either disconnect
+            want_timer_mode = (not probe_connected) or (not tc_connected)
+
+            if properties.warn_overtemp == 1 and prev_overtemp != 1:
+                print("decrease knob rotation by 30 steps")
+            prev_overtemp = properties.warn_overtemp
+
+            if want_timer_mode and not timer_mode:
+                timer_mode = True
+                deadline_s = None
+                deadline_label = ""
+                print("Sensor disconnect -> switching to TIMER_MODE")
+            elif (not want_timer_mode) and timer_mode:
+                timer_mode = False
+                deadline_s = None
+                deadline_label = ""
+                print("Sensors reconnected -> switching back to SENSOR_MODE")
+
+            pan_c = tc_avg
+            internal_c = temp_avg
+
+            _status_line(pan_c, internal_c)
+
+            if (not started) and fsm_sys.state == fsm.State.IDLE:
+                fsm_sys.dispatch(fsm.EventMsg(fsm.Event.START))
+                started = True
+
+            fsm_sys.update_pan_temp(pan_c)
+
+            # --- PREHEAT -> SEAR1 ---
+            if fsm_sys.state == fsm.State.PREHEAT:
+
+                # TIMER MODE (sensor disconnected)
+                if timer_mode:
+
+                    if deadline_s is None:
+                        deadline_s = time.monotonic() + 10.0   # 3 min preheat
+                        deadline_label = "PREHEAT"
+
+                    rem = deadline_s - time.monotonic()
+                    _countdown_line(deadline_label, rem)
+
+                    if rem <= 0:
+                        print()
+                        fsm_sys.dispatch(fsm.EventMsg(fsm.Event.TEMP_REACHED))
+                        deadline_s = None
+                        deadline_label = ""
+
+                # SENSOR MODE
+                else:
+                    if pan_c >= fsm_sys.target_pan_temp_c:
+                        fsm_sys.dispatch(
+                            fsm.EventMsg(fsm.Event.TEMP_REACHED, {"pan_c": pan_c})
+                        )
+
+            # --- SEAR1 -> SEAR2 ---
+            if fsm_sys.state == fsm.State.SEAR1:
+                if timer_mode:
+                    if deadline_s is None:
+                        deadline_s = time.monotonic() + SEAR_SIDE_S
+                        deadline_label = "SEAR1"
+                    rem = deadline_s - time.monotonic()
+                    _countdown_line(deadline_label, rem)
+                    if rem <= 0:
+                        print()
+                        fsm_sys.dispatch(fsm.EventMsg(fsm.Event.FLIP))
+                        deadline_s = None
+                        deadline_label = ""
+                else:
+                    # SENSOR_MODE: auto-flip when internal hits a threshold
+                    if (not flip_sent) and internal_c >= FLIP_PAN_C:
+                        fsm_sys.dispatch(fsm.EventMsg(fsm.Event.FLIP, {"pan_c": pan_c}))
+                        flip_sent = True
+
+            # --- SEAR2 -> REST ---
+            if fsm_sys.state == fsm.State.SEAR2:
+                if timer_mode:
+                    if deadline_s is None:
+                        deadline_s = time.monotonic() + SEAR_SIDE_S
+                        deadline_label = "SEAR2"
+                    rem = deadline_s - time.monotonic()
+                    _countdown_line(deadline_label, rem)
+                    if rem <= 0:
+                        print()
+                        fsm_sys.dispatch(fsm.EventMsg(fsm.Event.TARGET_MET))
+                        deadline_s = None
+                        deadline_label = ""
+                else:
+                    # SENSOR_MODE: internal target
+                    if internal_c >= INTERNAL_TARGET_C:
+                        fsm_sys.dispatch(fsm.EventMsg(fsm.Event.TARGET_MET, {"internal_c": internal_c}))
+
+            # --- REST -> DONE ---
+            if fsm_sys.state == fsm.State.REST:
+                if timer_mode:
+                    if deadline_s is None:
+                        deadline_s = time.monotonic() + REST_S
+                        deadline_label = "REST"
+                    rem = deadline_s - time.monotonic()
+                    _countdown_line(deadline_label, rem)
+                    if rem <= 0:
+                        print()
+                        fsm_sys.dispatch(fsm.EventMsg(fsm.Event.TIMER_EXPIRED))
+                        deadline_s = None
+                        deadline_label = ""
+                else:
+                    # SENSOR_MODE
+                    if deadline_s is None:
+                        deadline_s = time.monotonic() + REST_S
+                        deadline_label = "REST"
+                    rem = deadline_s - time.monotonic()
+                    _countdown_line(deadline_label, rem)
+                    if rem <= 0:
+                        print()
+                        fsm_sys.dispatch(fsm.EventMsg(fsm.Event.TIMER_EXPIRED))
+                        deadline_s = None
+                        deadline_label = ""
+
+            # --- DONE -> RESET -> IDLE (end test) ---
+            if fsm_sys.state == fsm.State.DONE:
+                fsm_sys.dispatch(fsm.EventMsg(fsm.Event.RESET))
+                break
 
 
 

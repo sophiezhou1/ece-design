@@ -52,7 +52,8 @@ class FSM:
 
             # standard path
             (State.IDLE, Event.START): (State.PREHEAT, None, self._act_start),
-            (State.PREHEAT, Event.TEMP_REACHED): (State.SEAR1, self._guard_temp_reached, self._act_begin_sear1),
+            # (State.PREHEAT, Event.TEMP_REACHED): (State.SEAR1, self._guard_temp_reached, self._act_begin_sear1),
+            (State.PREHEAT, Event.TEMP_REACHED): (State.SEAR1, None, self._act_begin_sear1),
             (State.SEAR1, Event.FLIP): (State.SEAR2, None, self._act_flip_and_begin_sear2),
             (State.SEAR2, Event.TARGET_MET): (State.REST, None, self._act_begin_rest),
             (State.REST, Event.TIMER_EXPIRED): (State.DONE, None, self._act_done),
@@ -115,7 +116,7 @@ class FSM:
         self._log("Start button pressed")
 
     def _act_begin_sear1(self, msg: EventMsg) -> None:
-        self._log("Pan temperature reached")
+        self._log("Pan temperature reached, add food now")
 
     def _act_flip_and_begin_sear2(self, msg: EventMsg) -> None:
         self._log("Flip food")
