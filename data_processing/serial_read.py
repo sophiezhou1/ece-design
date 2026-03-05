@@ -1,3 +1,5 @@
+# NOTE: UPDATING THE GRAPH INCREASES DELAY SIGNIFICANTLY
+
 import time
 import serial
 from serial.tools import list_ports
@@ -211,8 +213,8 @@ def main():
             temp_avg = ma_adc.update(temp_med)
             tc_med = med_tc.update(tc)
             tc_avg = ma_tc.update(tc_med)
-            print(f"{temp_avg:.2f} {tc_avg:.2f}")
-            plot.update_plot(t_us, temp_avg, tc_avg)
+            # print(f"{temp_avg:.2f} {tc_avg:.2f}")
+            # plot.update_plot(t_us, temp_avg, tc_avg)
 
             # [3] temp slope
             slope = linreg.update(t_us * 1e-6, temp_avg)
@@ -236,28 +238,34 @@ def main():
             # print(flags)
             fault_strings = []
 
-            if flags.fault_probe_dc == 1:
+            # if flags.fault_probe_dc == 1:
+            #     fault_strings.append("PROBE_DISCONNECT")
+            # if flags.fault_tc_dc == 1:
+            #     fault_strings.append("THERMOCOUPLE_DISCONNECT")
+            # if flags.fault_oc == 1:
+            #     fault_strings.append("TC_OPEN")
+            # if flags.fault_scg == 1:
+            #     fault_strings.append("TC_SHORT_GND")
+            # if flags.fault_scv == 1:
+            #     fault_strings.append("TC_SHORT_VCC")
+            # if flags.warn_overtemp == 1:
+            #     fault_strings.append("OVERTEMP")
+            # if flags.timer_mode:
+            #     fault_strings.append("TIMER_MODE")
+
+            print(f"{temp:.2f} {tc:.2f}")
+            fault_detection.apply_fault_flags(properties, flags)
+            if properties.fault_probe_dc == 1:
                 fault_strings.append("PROBE_DISCONNECT")
-
-            if flags.fault_tc_dc == 1:
+            if properties.fault_tc_dc == 1:
                 fault_strings.append("THERMOCOUPLE_DISCONNECT")
-
-            if flags.fault_oc == 1:
-                fault_strings.append("TC_OPEN")
-
-            if flags.fault_scg == 1:
-                fault_strings.append("TC_SHORT_GND")
-
-            if flags.fault_scv == 1:
-                fault_strings.append("TC_SHORT_VCC")
-
-            if flags.warn_overtemp == 1:
+            if properties.warn_overtemp == 1:
                 fault_strings.append("OVERTEMP")
 
-            if flags.timer_mode:
-                fault_strings.append("TIMER_MODE")
-
             print(",".join(fault_strings))
+
+            # [6] fsm
+
 
 
         except serial.SerialException as e:
