@@ -9,8 +9,10 @@ from dataclasses import dataclass
 import matplotlib.pyplot as plt
 from collections import deque
 
+# external py files
 import plot
 import filter_and_derive
+import fault_detection
 
 # buffer
 HISTORY_MAX = 5000
@@ -32,27 +34,28 @@ var = filter_and_derive.MovingVariance(50, 50)
 
 # structs
 @dataclass
-class sensor_data:
+class SensorData:
     t_us: int
     adc: int
     tc: float
 
 @dataclass
 class Properties:
+    # for persistent, not single sample
     fault: int = -1
-
     fault_oc: int = -1
     fault_scg: int = -1
     fault_scv: int = -1
+
     fault_drop: int = -1
     fault_probe_dc: int = -1
     fault_tc_dc: int = -1
 
     warn_overtemp: int = -1
+    timer_mode: bool = False
 
     slope: float = math.nan
     var: float = math.nan
-    time_remain: float = -1
     curr_state: str | None = None
 
 properties = Properties()
@@ -100,14 +103,15 @@ def open_serial() -> serial.Serial:
 
 def parse_line(line: str):
     try:
-        # split timestamp + raw first
+        # split timestamp + rest of the text
         t_us_str, rest = line.split(",", 1)
         t_us = int(t_us_str.strip())
 
-        # raw value
+        # rest
         adc_match = re.search(r"adc(\d+)", line)
         raw_match = re.search(r"raw=0x([0-9A-Fa-f]+)", rest)
         tc_match = re.search(r"tc=([-+]?\d*\.?\d+)", rest)
+        intern_match = re.search(r"intern=([-+]?\d*\.?\d+)", rest)
         fault_match = re.search(r"fault=(\d+)", rest)
         oc_match = re.search(r"OC=(\d+)", rest)
         scg_match = re.search(r"SCG=(\d+)", rest)
@@ -122,6 +126,7 @@ def parse_line(line: str):
         adc = int(adc_match.group(1))
         raw = int(raw_match.group(1), 16)
         tc = float(tc_match.group(1))
+        intern = float(intern_match.group(1))
         fault = int(fault_match.group(1))
         fault_oc = int(oc_match.group(1))
         fault_scg = int(scg_match.group(1))
@@ -131,6 +136,7 @@ def parse_line(line: str):
                 adc,
                 raw,
                 tc,
+                intern,
                 fault,
                 fault_oc,
                 fault_scg,
@@ -174,6 +180,8 @@ def thermistor_conv(raw):
 def main():
     global med_adc, med_tc, ma_adc, ma_tc, properties, linreg
     ser_conn = open_serial()
+    cfg = fault_detection.ThresholdConfig(overtemp_set=28, overtemp_clr=26, overtemp_trip_time=0.5)
+    monitor = fault_detection.FaultMonitor(cfg)
 
     while True:
         try:
@@ -186,11 +194,8 @@ def main():
                 continue
 
             try:
-                (t_us, adc, _, tc, fault, fault_oc, fault_scg, fault_scv) = parse_line(text)
-                properties.fault = fault
-                properties.fault_oc = fault_oc
-                properties.fault_scg = fault_scg
-                properties.fault_scv = fault_scv
+                # fault flags used later in fault_detection.py for persistent fault detection
+                (t_us, adc, _, tc, intern, fault, fault_oc, fault_scg, fault_scv) = parse_line(text)
             except:
                 continue
             temp = thermistor_conv(adc)
@@ -200,7 +205,7 @@ def main():
             # plot.update_plot(t_us, temp, tc)
 
             # [2] with moving avg filtering
-            sample = sensor_data(t_us, temp, tc) # adc is preprocessed temp
+            sample = SensorData(t_us, temp, tc) # adc is preprocessed temp
             history.append(sample)
             temp_med = med_adc.update(temp)
             temp_avg = ma_adc.update(temp_med)
@@ -223,6 +228,36 @@ def main():
                 continue
             properties.var = variance
             # print(properties.var)
+
+            # [5] fault detection
+            # cfg and monitor defined at top of main
+            # print(adc, tc, intern)
+            flags = monitor.update(t_us, adc, tc, intern, fault, fault_oc, fault_scg, fault_scv)
+            # print(flags)
+            fault_strings = []
+
+            if flags.fault_probe_dc == 1:
+                fault_strings.append("PROBE_DISCONNECT")
+
+            if flags.fault_tc_dc == 1:
+                fault_strings.append("THERMOCOUPLE_DISCONNECT")
+
+            if flags.fault_oc == 1:
+                fault_strings.append("TC_OPEN")
+
+            if flags.fault_scg == 1:
+                fault_strings.append("TC_SHORT_GND")
+
+            if flags.fault_scv == 1:
+                fault_strings.append("TC_SHORT_VCC")
+
+            if flags.warn_overtemp == 1:
+                fault_strings.append("OVERTEMP")
+
+            if flags.timer_mode:
+                fault_strings.append("TIMER_MODE")
+
+            print(",".join(fault_strings))
 
 
         except serial.SerialException as e:
@@ -255,8 +290,9 @@ def main():
                 med_tc = filter_and_derive.MedianFilter(MED_N)
                 ma_tc  = filter_and_derive.MovingAverage(MA_N)
 
-                # clear linear regression
+                # clear linear regression and variance
                 linreg.reset()
+                var.reset()
 
                 # close all
                 plt.close('all')
