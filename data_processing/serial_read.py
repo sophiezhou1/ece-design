@@ -7,6 +7,7 @@ import math
 import re
 import numpy as np
 from dataclasses import dataclass
+import time
 
 import matplotlib.pyplot as plt
 from collections import deque
@@ -15,6 +16,7 @@ from collections import deque
 import plot
 import filter_and_derive
 import fault_detection
+import fsm
 
 # buffer
 HISTORY_MAX = 5000
@@ -182,8 +184,9 @@ def thermistor_conv(raw):
 def main():
     global med_adc, med_tc, ma_adc, ma_tc, properties, linreg
     ser_conn = open_serial()
-    cfg = fault_detection.ThresholdConfig(overtemp_set=28, overtemp_clr=26, overtemp_trip_time=0.5)
+    cfg = fault_detection.ThresholdConfig(overtemp_set=50, overtemp_clr=48, overtemp_trip_time=0.5)
     monitor = fault_detection.FaultMonitor(cfg)
+    fsm_sys = fsm.FSM(target_pan_temp_c=30)
 
     while True:
         try:
@@ -253,7 +256,7 @@ def main():
             # if flags.timer_mode:
             #     fault_strings.append("TIMER_MODE")
 
-            print(f"{temp:.2f} {tc:.2f}")
+            # print(f"{temp:.2f} {tc:.2f}")
             fault_detection.apply_fault_flags(properties, flags)
             if properties.fault_probe_dc == 1:
                 fault_strings.append("PROBE_DISCONNECT")
@@ -262,9 +265,34 @@ def main():
             if properties.warn_overtemp == 1:
                 fault_strings.append("OVERTEMP")
 
-            print(",".join(fault_strings))
+            # print(",".join(fault_strings))
 
-            # [6] fsm
+            # [6] sample fsm
+            # start in IDLE
+            if fsm_sys.state == fsm.State.IDLE:
+                fsm_sys.dispatch(fsm.EventMsg(fsm.Event.START))
+
+            fsm_sys.update_pan_temp(tc)
+
+            if fsm_sys.state == fsm.State.PREHEAT and tc >= fsm_sys.target_pan_temp_c:
+                fsm_sys.dispatch(fsm.EventMsg(fsm.Event.TEMP_REACHED, {"tc_temp_c": tc})) # to SEAR1
+
+            if fsm_sys.state == fsm.State.SEAR1:
+                time.sleep(5)
+                fsm_sys.dispatch(fsm.EventMsg(fsm.Event.FLIP)) # to SEAR2
+
+            if fsm_sys.state == fsm.State.SEAR2:
+                time.sleep(5)
+                fsm_sys.dispatch(fsm.EventMsg(fsm.Event.TARGET_MET)) # to REST
+
+            if fsm_sys.state == fsm.State.REST:
+                time.sleep(5)
+                fsm_sys.dispatch(fsm.EventMsg(fsm.Event.TIMER_EXPIRED)) # to DONE
+
+            if fsm_sys.state == fsm.State.DONE:
+                time.sleep(5)
+                fsm_sys.dispatch(fsm.EventMsg(fsm.Event.RESET)) # to IDLE
+                break
 
 
 
@@ -301,6 +329,9 @@ def main():
                 # clear linear regression and variance
                 linreg.reset()
                 var.reset()
+
+                # clear fault detection
+                fault_detection.FaultFlags.clear()
 
                 # close all
                 plt.close('all')
