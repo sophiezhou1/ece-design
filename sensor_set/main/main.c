@@ -95,107 +95,149 @@ static float max31855_internal(uint32_t raw) {
 }
 
 
+/*
+!!! CENTER RAIL IS 5V !!!
+esp32 [4] -> uln in [1] -> uln out [18] -> stepper (blue)
+esp32 [5] -> uln in [2] -> uln out [17] -> stepper (pink)
+esp32 [6] -> uln in [3] -> uln out [16] -> stepper (yellow)
+esp32 [7] -> uln in [4] -> uln out [15] -> stepper (orange)
+uln [10] -> stepper 5V (red)
+uln [9] -> GND
+*/
+
+// static const int pins[4] = {4, 5, 6, 7};
+
+static const int steps[4][4] = {
+    {1,0,0,0},
+    {0,1,0,0},
+    {0,0,1,0},
+    {0,0,0,1}
+};
+
 void app_main(void)
 {
-    // adc init
-    setvbuf(stdout, NULL, _IONBF, 0);  // real-time prints
-
-    adc_unit_t unit;
-    adc_channel_t channel;
-    ESP_ERROR_CHECK(adc_continuous_io_to_channel(GPIO_NUM_1, &unit, &channel));
-
-    adc_continuous_handle_t handle = NULL;
-    adc_continuous_handle_cfg_t adc_config = {
-        .max_store_buf_size = 4096,
-        .conv_frame_size = 1024,
+    gpio_config_t io_conf = {
+        .pin_bit_mask = (1ULL << 4) | (1ULL << 5) | (1ULL << 6) | (1ULL << 7),
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE
     };
-    ESP_ERROR_CHECK(adc_continuous_new_handle(&adc_config, &handle));
+    gpio_config(&io_conf);
 
-    adc_digi_pattern_config_t pattern = {
-        .atten = ADC_ATTEN_DB_12,
-        .bit_width = ADC_BITWIDTH_12,
-        .channel = channel,
-        .unit = unit,
-    };
-
-    adc_continuous_config_t cfg = {
-        .sample_freq_hz = 2000,
-        .conv_mode = ADC_CONV_SINGLE_UNIT_1,
-        .format = ADC_DIGI_OUTPUT_FORMAT_TYPE2,
-        .pattern_num = 1,
-        .adc_pattern = &pattern,
-    };
-
-    ESP_ERROR_CHECK(adc_continuous_config(handle, &cfg));
-    ESP_ERROR_CHECK(adc_continuous_start(handle));
-
-    uint8_t result[1024];
-
-    // allocate parsed_data once, not based on ret_num
-    static adc_continuous_data_t parsed_data[1024 / SOC_ADC_DIGI_RESULT_BYTES];
-
-    // Print at ~10 Hz by decimating samples
-    const uint32_t DECIM_N = 20;      // for 2000 Hz, DECIM_N = 200 -> 10 Hz
-    static uint32_t decim = 0;
-
-    
-    
-    // spi init
-    ESP_ERROR_CHECK(max31855_init());
-    
-    
-    
-    while (true) {
-        // adc run
-        uint32_t ret_num = 0;
-        esp_err_t ret = adc_continuous_read(handle, result, sizeof(result), &ret_num, 1000);
-        if (ret != ESP_OK || ret_num == 0) {
-            vTaskDelay(pdMS_TO_TICKS(1));
-            continue;
+    while (1) {
+        for (int s = 0; s < 4; s++) {
+            gpio_set_level(4, steps[s][0]);
+            gpio_set_level(5, steps[s][1]);
+            gpio_set_level(6, steps[s][2]);
+            gpio_set_level(7, steps[s][3]);
+            vTaskDelay(pdMS_TO_TICKS(20));
         }
-
-        uint32_t num_parsed_samples = 0;
-        esp_err_t parse_ret = adc_continuous_parse_data(
-            handle,
-            result,
-            ret_num,
-            parsed_data,
-            &num_parsed_samples
-        );
-
-        if (parse_ret != ESP_OK) {
-            vTaskDelay(pdMS_TO_TICKS(1));
-            continue;
-        }
-
-        // spi run
-        uint32_t raw_tc = 0;
-        ESP_ERROR_CHECK(max31855_read_raw(&raw_tc));
-
-        bool fault = false;
-        float tc = max31855_tctemp_fault(raw_tc, &fault);
-        float intern = max31855_internal(raw_tc);
-
-        // oc fault: 0, scg fault: 1, scv falt: 2
-        uint8_t fault_oc = (raw_tc >> 0) & 1u;
-        uint8_t fault_scg = (raw_tc >> 1) & 1u;
-        uint8_t fault_scv = (raw_tc >> 2) & 1u;
-
-        for (uint32_t i = 0; i < num_parsed_samples; i++) {
-            if (!parsed_data[i].valid) continue;
-
-            if ((++decim % DECIM_N) != 0) continue;
-
-            uint32_t raw = parsed_data[i].raw_data;
-            int64_t t_us = esp_timer_get_time();
-            // printf("%" PRId64 ",%" PRIu32 "\n", t_us, raw);
-            // printf("raw=0x%08" PRIX32 "  tc=%.2f C  intern=%.2f C  fault=%d (OC=%d SCG=%d SCV=%d)\n",
-            //     raw_tc, tc, intern, fault, fault_oc, fault_scg, fault_scv);
-            printf("%" PRId64 ",adc%" PRIu32 " raw=0x%08" PRIX32 "  tc=%.2f C  intern=%.2f C  fault=%d (OC=%d SCG=%d SCV=%d)\n", t_us, raw, raw_tc, tc, intern, fault, fault_oc, fault_scg, fault_scv);
-        }
-
-        vTaskDelay(pdMS_TO_TICKS(1));
-
-        // vTaskDelay(pdMS_TO_TICKS(250));
     }
 }
+
+
+// void app_main(void)
+// {
+//     // adc init
+//     setvbuf(stdout, NULL, _IONBF, 0);  // real-time prints
+
+//     adc_unit_t unit;
+//     adc_channel_t channel;
+//     ESP_ERROR_CHECK(adc_continuous_io_to_channel(GPIO_NUM_1, &unit, &channel));
+
+//     adc_continuous_handle_t handle = NULL;
+//     adc_continuous_handle_cfg_t adc_config = {
+//         .max_store_buf_size = 4096,
+//         .conv_frame_size = 1024,
+//     };
+//     ESP_ERROR_CHECK(adc_continuous_new_handle(&adc_config, &handle));
+
+//     adc_digi_pattern_config_t pattern = {
+//         .atten = ADC_ATTEN_DB_12,
+//         .bit_width = ADC_BITWIDTH_12,
+//         .channel = channel,
+//         .unit = unit,
+//     };
+
+//     adc_continuous_config_t cfg = {
+//         .sample_freq_hz = 2000,
+//         .conv_mode = ADC_CONV_SINGLE_UNIT_1,
+//         .format = ADC_DIGI_OUTPUT_FORMAT_TYPE2,
+//         .pattern_num = 1,
+//         .adc_pattern = &pattern,
+//     };
+
+//     ESP_ERROR_CHECK(adc_continuous_config(handle, &cfg));
+//     ESP_ERROR_CHECK(adc_continuous_start(handle));
+
+//     uint8_t result[1024];
+
+//     // allocate parsed_data once, not based on ret_num
+//     static adc_continuous_data_t parsed_data[1024 / SOC_ADC_DIGI_RESULT_BYTES];
+
+//     // Print at ~10 Hz by decimating samples
+//     const uint32_t DECIM_N = 20;      // for 2000 Hz, DECIM_N = 200 -> 10 Hz
+//     static uint32_t decim = 0;
+
+    
+    
+//     // spi init
+//     ESP_ERROR_CHECK(max31855_init());
+    
+    
+    
+//     while (true) {
+//         // adc run
+//         uint32_t ret_num = 0;
+//         esp_err_t ret = adc_continuous_read(handle, result, sizeof(result), &ret_num, 1000);
+//         if (ret != ESP_OK || ret_num == 0) {
+//             vTaskDelay(pdMS_TO_TICKS(1));
+//             continue;
+//         }
+
+//         uint32_t num_parsed_samples = 0;
+//         esp_err_t parse_ret = adc_continuous_parse_data(
+//             handle,
+//             result,
+//             ret_num,
+//             parsed_data,
+//             &num_parsed_samples
+//         );
+
+//         if (parse_ret != ESP_OK) {
+//             vTaskDelay(pdMS_TO_TICKS(1));
+//             continue;
+//         }
+
+//         // spi run
+//         uint32_t raw_tc = 0;
+//         ESP_ERROR_CHECK(max31855_read_raw(&raw_tc));
+
+//         bool fault = false;
+//         float tc = max31855_tctemp_fault(raw_tc, &fault);
+//         float intern = max31855_internal(raw_tc);
+
+//         // oc fault: 0, scg fault: 1, scv falt: 2
+//         uint8_t fault_oc = (raw_tc >> 0) & 1u;
+//         uint8_t fault_scg = (raw_tc >> 1) & 1u;
+//         uint8_t fault_scv = (raw_tc >> 2) & 1u;
+
+//         for (uint32_t i = 0; i < num_parsed_samples; i++) {
+//             if (!parsed_data[i].valid) continue;
+
+//             if ((++decim % DECIM_N) != 0) continue;
+
+//             uint32_t raw = parsed_data[i].raw_data;
+//             int64_t t_us = esp_timer_get_time();
+//             // printf("%" PRId64 ",%" PRIu32 "\n", t_us, raw);
+//             // printf("raw=0x%08" PRIX32 "  tc=%.2f C  intern=%.2f C  fault=%d (OC=%d SCG=%d SCV=%d)\n",
+//             //     raw_tc, tc, intern, fault, fault_oc, fault_scg, fault_scv);
+//             printf("%" PRId64 ",adc%" PRIu32 " raw=0x%08" PRIX32 "  tc=%.2f C  intern=%.2f C  fault=%d (OC=%d SCG=%d SCV=%d)\n", t_us, raw, raw_tc, tc, intern, fault, fault_oc, fault_scg, fault_scv);
+//         }
+
+//         vTaskDelay(pdMS_TO_TICKS(1));
+
+//         // vTaskDelay(pdMS_TO_TICKS(250));
+//     }
+// }
