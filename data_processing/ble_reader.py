@@ -1,15 +1,20 @@
 #!/usr/bin/env python3
-"""
-Barebones BLE reader for sensor_set payload.
+"""Barebones BLE reader for sensor_set payload.
+
 Requires: bleak (pip install bleak)
 """
 
 import asyncio
 import struct
+import argparse
 from bleak import BleakScanner, BleakClient
 
 DEVICE_NAME = "sensor_set"
-CHAR_UUID = "78563412-9abc-def0-1234-56780100ee01"
+# NimBLE BLE_UUID128_INIT(...) byte-order as shown by host scanners (macOS/CoreBluetooth).
+SERVICE_UUID = "01ee0000-7856-3412-f0de-bc9a12345678"
+CHAR_UUID = "01ee0001-7856-3412-f0de-bc9a12345678"
+# Canonical human-order form (accepted as alternate match to reduce confusion).
+SERVICE_UUID_ALT = "78563412-9abc-def0-1234-56780000ee01"
 
 # < = little-endian
 # I   uint32 seq
@@ -38,13 +43,34 @@ def decode_packet(data: bytearray):
 
 
 async def main():
-    print("Scanning for device...")
-    dev = await BleakScanner.find_device_by_filter(
-        lambda d, _: (d.name or "") == DEVICE_NAME,
-        timeout=15.0,
-    )
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--name", default=DEVICE_NAME, help="BLE local name (optional)")
+    parser.add_argument("--address", default=None, help="MAC/UUID (strongest match)")
+    parser.add_argument("--scan-seconds", type=float, default=20.0)
+    args = parser.parse_args()
+
+    print(f"Scanning for device for {args.scan_seconds:.0f}s...")
+    valid_service_uuids = {SERVICE_UUID.lower(), SERVICE_UUID_ALT.lower()}
+
+    def _matches(device, adv_data):
+        if args.address and device.address.lower() == args.address.lower():
+            return True
+        if adv_data and adv_data.service_uuids:
+            advertised = {u.lower() for u in adv_data.service_uuids}
+            if advertised.intersection(valid_service_uuids):
+                return True
+        if args.name:
+            return (device.name or "") == args.name
+        return False
+
+    dev = await BleakScanner.find_device_by_filter(_matches, timeout=args.scan_seconds)
     if not dev:
-        raise RuntimeError(f"Could not find BLE device named '{DEVICE_NAME}'")
+        print("No exact match found. Nearby devices:")
+        devices = await BleakScanner.discover(timeout=5.0, return_adv=True)
+        for d, (dev_info, adv) in devices.items():
+            uuids = list((adv.service_uuids or []))
+            print(f"  - {dev_info.address} | name={dev_info.name!r} | uuids={uuids}")
+        raise RuntimeError("Could not find device. Try --address <id> from the list above.")
 
     async with BleakClient(dev) as client:
         print(f"Connected: {dev.address}")

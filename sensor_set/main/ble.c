@@ -39,6 +39,10 @@ static const ble_uuid128_t SENSOR_SERVICE_UUID =
 static const ble_uuid128_t SENSOR_DATA_CHAR_UUID =
     BLE_UUID128_INIT(0x78, 0x56, 0x34, 0x12, 0x9A, 0xBC, 0xDE, 0xF0,
                      0x12, 0x34, 0x56, 0x78, 0x01, 0x00, 0xEE, 0x01);
+static const ble_uuid128_t ADV_SERVICE_UUIDS[] = {
+    BLE_UUID128_INIT(0x78, 0x56, 0x34, 0x12, 0x9A, 0xBC, 0xDE, 0xF0,
+                     0x12, 0x34, 0x56, 0x78, 0x00, 0x00, 0xEE, 0x01)
+};
 
 #pragma pack(push, 1)
 typedef struct {
@@ -151,17 +155,29 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg)
 static void ble_app_advertise(void)
 {
     struct ble_gap_adv_params adv_params;
-    struct ble_hs_adv_fields fields;
+    struct ble_hs_adv_fields adv_fields;
+    struct ble_hs_adv_fields rsp_fields;
 
-    memset(&fields, 0, sizeof(fields));
-    fields.flags = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
-    fields.name = (const uint8_t *)DEVICE_NAME;
-    fields.name_len = strlen(DEVICE_NAME);
-    fields.name_is_complete = 1;
+    memset(&adv_fields, 0, sizeof(adv_fields));
+    adv_fields.flags = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
+    adv_fields.uuids128 = ADV_SERVICE_UUIDS;
+    adv_fields.num_uuids128 = 1;
+    adv_fields.uuids128_is_complete = 1;
 
-    int rc = ble_gap_adv_set_fields(&fields);
+    int rc = ble_gap_adv_set_fields(&adv_fields);
     if (rc != 0) {
         ESP_LOGE(TAG, "ble_gap_adv_set_fields failed: %d", rc);
+        return;
+    }
+
+    memset(&rsp_fields, 0, sizeof(rsp_fields));
+    rsp_fields.name = (const uint8_t *)DEVICE_NAME;
+    rsp_fields.name_len = strlen(DEVICE_NAME);
+    rsp_fields.name_is_complete = 1;
+
+    rc = ble_gap_adv_rsp_set_fields(&rsp_fields);
+    if (rc != 0) {
+        ESP_LOGE(TAG, "ble_gap_adv_rsp_set_fields failed: %d", rc);
         return;
     }
 
