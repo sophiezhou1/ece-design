@@ -27,16 +27,38 @@
 #include "services/gap/ble_svc_gap.h"
 #include "services/gatt/ble_svc_gatt.h"
 
-
 static const char *TAG = "sensor_ble";
 
 #define DEVICE_NAME             "sensor_set"
 #define TX_PERIOD_MS            1000
 #define SESSION_DURATION_MS     (60 * 60 * 1000)
+
+/* Shared SPI bus pins from your pinout */
 #define PIN_SCK                 12
 #define PIN_MISO                13
-#define PIN_CS                  10
+#define PIN_MOSI                11
+
+/* MAX31855 */
+#define PIN_MAX_CS              10
+
+/* LCD */
+#define PIN_LCD_CS              14
+#define PIN_LCD_DC              15
+#define PIN_LCD_RST             16
+#define PIN_LCD_BL              17
+#define LCD_W                   320
+#define LCD_H                   240
+
 #define ADC_INPUT_GPIO          GPIO_NUM_1
+
+#define COLOR_BLACK             0x0000
+#define COLOR_WHITE             0xFFFF
+#define COLOR_RED               0xF800
+#define COLOR_GREEN             0x07E0
+#define COLOR_BLUE              0x001F
+#define COLOR_YELLOW            0xFFE0
+#define COLOR_CYAN              0x07FF
+#define COLOR_DARKGREY          0x7BEF
 
 static const ble_uuid128_t SENSOR_SERVICE_UUID =
     BLE_UUID128_INIT(0x78, 0x56, 0x34, 0x12, 0x9A, 0xBC, 0xDE, 0xF0,
@@ -45,6 +67,7 @@ static const ble_uuid128_t SENSOR_SERVICE_UUID =
 static const ble_uuid128_t SENSOR_DATA_CHAR_UUID =
     BLE_UUID128_INIT(0x78, 0x56, 0x34, 0x12, 0x9A, 0xBC, 0xDE, 0xF0,
                      0x12, 0x34, 0x56, 0x78, 0x01, 0x00, 0xEE, 0x01);
+
 static const ble_uuid128_t ADV_SERVICE_UUIDS[] = {
     BLE_UUID128_INIT(0x78, 0x56, 0x34, 0x12, 0x9A, 0xBC, 0xDE, 0xF0,
                      0x12, 0x34, 0x56, 0x78, 0x00, 0x00, 0xEE, 0x01)
@@ -69,35 +92,354 @@ static uint32_t g_seq = 0;
 static uint8_t g_own_addr_type = BLE_OWN_ADDR_PUBLIC;
 static portMUX_TYPE g_pkt_lock = portMUX_INITIALIZER_UNLOCKED;
 static sensor_packet_t g_latest_pkt = {0};
+
+/* SPI devices */
 static spi_device_handle_t g_maxdev = NULL;
+static spi_device_handle_t g_lcddev = NULL;
+static bool g_spi_bus_ready = false;
 
 static void ble_app_advertise(void);
 
-static esp_err_t max31855_init(void)
-{
+/* --------------------------- LCD helpers --------------------------- */
+
+static inline void lcd_dc_cmd(void) {
+    gpio_set_level(PIN_LCD_DC, 0);
+}
+
+static inline void lcd_dc_data(void) {
+    gpio_set_level(PIN_LCD_DC, 1);
+}
+
+static void lcd_send_cmd(uint8_t cmd) {
+    spi_transaction_t t = {
+        .length = 8,
+        .tx_buffer = &cmd,
+    };
+    lcd_dc_cmd();
+    ESP_ERROR_CHECK(spi_device_transmit(g_lcddev, &t));
+}
+
+static void lcd_send_data(const void *data, int len_bytes) {
+    if (len_bytes <= 0) return;
+    spi_transaction_t t = {
+        .length = len_bytes * 8,
+        .tx_buffer = data,
+    };
+    lcd_dc_data();
+    ESP_ERROR_CHECK(spi_device_transmit(g_lcddev, &t));
+}
+
+static void lcd_send_u8(uint8_t data) {
+    lcd_send_data(&data, 1);
+}
+
+static void lcd_send_u16_be(uint16_t value) {
+    uint8_t buf[2] = { (uint8_t)(value >> 8), (uint8_t)(value & 0xFF) };
+    lcd_send_data(buf, 2);
+}
+
+static void lcd_reset_hw(void) {
+    gpio_set_level(PIN_LCD_RST, 0);
+    vTaskDelay(pdMS_TO_TICKS(100));
+    gpio_set_level(PIN_LCD_RST, 1);
+    vTaskDelay(pdMS_TO_TICKS(120));
+}
+
+static void lcd_set_addr_window(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1) {
+    lcd_send_cmd(0x2A);
+    lcd_send_u16_be(x0);
+    lcd_send_u16_be(x1);
+
+    lcd_send_cmd(0x2B);
+    lcd_send_u16_be(y0);
+    lcd_send_u16_be(y1);
+
+    lcd_send_cmd(0x2C);
+}
+
+static void lcd_fill_rect(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t color) {
+    if (x >= LCD_W || y >= LCD_H) return;
+    if (x + w > LCD_W) w = LCD_W - x;
+    if (y + h > LCD_H) h = LCD_H - y;
+    if (w == 0 || h == 0) return;
+
+    lcd_set_addr_window(x, y, x + w - 1, y + h - 1);
+
+    const int chunk_pixels = 128;
+    uint16_t linebuf[chunk_pixels];
+    for (int i = 0; i < chunk_pixels; i++) {
+        linebuf[i] = (uint16_t)((color << 8) | (color >> 8)); // byte-swapped for SPI
+    }
+
+    int total = w * h;
+    while (total > 0) {
+        int n = (total > chunk_pixels) ? chunk_pixels : total;
+        lcd_send_data(linebuf, n * 2);
+        total -= n;
+    }
+}
+
+static void lcd_draw_hseg(int x, int y, int len, int thick, uint16_t color) {
+    lcd_fill_rect(x, y, len, thick, color);
+}
+
+static void lcd_draw_vseg(int x, int y, int thick, int len, uint16_t color) {
+    lcd_fill_rect(x, y, thick, len, color);
+}
+
+static void lcd_draw_colon7(int x, int y, int scale, uint16_t color, uint16_t bg) {
+    int s = 4 * scale;
+    lcd_fill_rect(x, y, 6 * scale, 32 * scale, bg);
+    lcd_fill_rect(x, y + 8 * scale, s, s, color);
+    lcd_fill_rect(x, y + 20 * scale, s, s, color);
+}
+
+static void lcd_draw_dot7(int x, int y, int scale, uint16_t color, uint16_t bg) {
+    lcd_fill_rect(x, y, 6 * scale, 32 * scale, bg);
+    lcd_fill_rect(x, y + 26 * scale, 4 * scale, 4 * scale, color);
+}
+
+static void lcd_clear(uint16_t color) {
+    lcd_fill_rect(0, 0, LCD_W, LCD_H, color);
+}
+
+static void lcd_draw_pixel(uint16_t x, uint16_t y, uint16_t color) {
+    if (x >= LCD_W || y >= LCD_H) return;
+    lcd_set_addr_window(x, y, x, y);
+    uint16_t swapped = (uint16_t)((color << 8) | (color >> 8));
+    lcd_send_data(&swapped, 2);
+}
+
+/* Better approach: large readable numeric bars without needing a full font */
+static void lcd_draw_bar(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
+                         float value, float minv, float maxv, uint16_t color) {
+    lcd_fill_rect(x, y, w, h, COLOR_DARKGREY);
+    if (value < minv) value = minv;
+    if (value > maxv) value = maxv;
+    uint16_t fill = (uint16_t)(((value - minv) / (maxv - minv)) * w);
+    lcd_fill_rect(x, y, fill, h, color);
+}
+
+static void lcd_draw_digit7(int x, int y, int scale, int digit, uint16_t color, uint16_t bg) {
+    static const uint8_t map[10] = {
+        0b1111110, // 0
+        0b0110000, // 1
+        0b1101101, // 2
+        0b1111001, // 3
+        0b0110011, // 4
+        0b1011011, // 5
+        0b1011111, // 6
+        0b1110000, // 7
+        0b1111111, // 8
+        0b1111011  // 9
+    };
+
+    int w = 18 * scale;
+    int h = 32 * scale;
+    int t = 4 * scale;
+    int v = (h - 3 * t) / 2;
+
+    lcd_fill_rect(x, y, w, h, bg);
+
+    uint8_t m = map[digit];
+    if (m & (1 << 6)) lcd_draw_hseg(x + t,     y,         w - 2 * t, t, color);           // a
+    if (m & (1 << 5)) lcd_draw_vseg(x + w - t, y + t,     t, v, color);                   // b
+    if (m & (1 << 4)) lcd_draw_vseg(x + w - t, y + 2*t+v, t, v, color);                   // c
+    if (m & (1 << 3)) lcd_draw_hseg(x + t,     y + h - t, w - 2 * t, t, color);           // d
+    if (m & (1 << 2)) lcd_draw_vseg(x,         y + 2*t+v, t, v, color);                   // e
+    if (m & (1 << 1)) lcd_draw_vseg(x,         y + t,     t, v, color);                   // f
+    if (m & (1 << 0)) lcd_draw_hseg(x + t,     y + t + v, w - 2 * t, t, color);           // g
+}
+
+static void lcd_draw_number_1dp(int x, int y, int scale, float value, uint16_t color, uint16_t bg) {
+    if (value < 0) value = 0;
+    int v10 = (int)(value * 10.0f + 0.5f);   // one decimal place
+    int hundreds = (v10 / 1000) % 10;
+    int tens     = (v10 / 100) % 10;
+    int ones     = (v10 / 10) % 10;
+    int tenths   = v10 % 10;
+
+    int dx = 22 * scale;
+
+    if (hundreds > 0) {
+        lcd_draw_digit7(x, y, scale, hundreds, color, bg);
+    }
+    lcd_draw_digit7(x + dx,     y, scale, tens,   color, bg);
+    lcd_draw_digit7(x + 2*dx,   y, scale, ones,   color, bg);
+    lcd_draw_dot7  (x + 3*dx-6, y, scale, color, bg);
+    lcd_draw_digit7(x + 3*dx,   y, scale, tenths, color, bg);
+}
+
+static void lcd_draw_number_int(int x, int y, int scale, int value, uint16_t color, uint16_t bg) {
+    if (value < 0) value = 0;
+    if (value > 9999) value = 9999;
+
+    int d0 = (value / 1000) % 10;
+    int d1 = (value / 100) % 10;
+    int d2 = (value / 10) % 10;
+    int d3 = value % 10;
+
+    int dx = 22 * scale;
+    int started = 0;
+
+    if (d0 || started) { lcd_draw_digit7(x + 0*dx, y, scale, d0, color, bg); started = 1; }
+    if (d1 || started) { lcd_draw_digit7(x + 1*dx, y, scale, d1, color, bg); started = 1; }
+    if (d2 || started) { lcd_draw_digit7(x + 2*dx, y, scale, d2, color, bg); started = 1; }
+    lcd_draw_digit7(x + 3*dx, y, scale, d3, color, bg);
+}
+
+static void lcd_render_packet(const sensor_packet_t *pkt) {
+    lcd_clear(COLOR_BLACK);
+
+    /* top banner */
+    lcd_fill_rect(0, 0, 320, 28, COLOR_BLUE);
+
+    /* thermocouple area */
+    lcd_fill_rect(10, 40, 300, 70, 0x0841);   // dark panel
+    lcd_draw_number_1dp(20, 52, 1, pkt->thermocouple_c, COLOR_YELLOW, 0x0841);
+    lcd_draw_bar(20, 90, 270, 10, pkt->thermocouple_c, 0.0f, 300.0f, COLOR_YELLOW);
+
+    /* food probe raw ADC area */
+    lcd_fill_rect(10, 125, 300, 70, 0x0841);
+    lcd_draw_number_int(20, 137, 1, (int)(pkt->food_probe_c + 0.5f), COLOR_GREEN, 0x0841);
+    lcd_draw_bar(20, 175, 270, 10, pkt->food_probe_c, 0.0f, 4095.0f, COLOR_GREEN);
+
+    /* status blocks */
+    if (pkt->control_flags & 0x01) {
+        lcd_fill_rect(15, 205, 70, 20, COLOR_RED);      // TC fault
+    } else {
+        lcd_fill_rect(15, 205, 70, 20, COLOR_GREEN);    // TC good
+    }
+
+    if (g_conn_handle != BLE_HS_CONN_HANDLE_NONE) {
+        if (g_notify_enabled) {
+            lcd_fill_rect(95, 205, 70, 20, COLOR_GREEN);   // BLE notify on
+        } else {
+            lcd_fill_rect(95, 205, 70, 20, COLOR_YELLOW);  // connected
+        }
+    } else {
+        lcd_fill_rect(95, 205, 70, 20, COLOR_BLUE);        // advertising
+    }
+
+    /* fault detail bits from MAX31855 */
+    if (pkt->tc_fault_flags & 0x01) lcd_fill_rect(180, 205, 18, 20, COLOR_RED);   // OC
+    if (pkt->tc_fault_flags & 0x02) lcd_fill_rect(205, 205, 18, 20, COLOR_RED);   // SCG
+    if (pkt->tc_fault_flags & 0x04) lcd_fill_rect(230, 205, 18, 20, COLOR_RED);   // SCV
+}
+
+static void lcd_draw_char_block(uint16_t x, uint16_t y, char c, uint16_t fg, uint16_t bg) {
+    (void)c;
+    lcd_fill_rect(x, y, 5, 7, bg);
+    lcd_fill_rect(x + 1, y + 1, 3, 5, fg);
+}
+
+static void lcd_draw_string_block(uint16_t x, uint16_t y, const char *s, uint16_t fg, uint16_t bg) {
+    while (*s) {
+        if (*s == ' ') {
+            lcd_fill_rect(x, y, 6, 8, bg);
+        } else {
+            lcd_draw_char_block(x, y, *s, fg, bg);
+        }
+        x += 6;
+        s++;
+    }
+}
+
+static void lcd_write_label_value(uint16_t y, const char *label, float value, const char *unit,
+                                  uint16_t color) {
+    char buf[48];
+    snprintf(buf, sizeof(buf), "%s %.1f %s", label, value, unit);
+    lcd_draw_string_block(10, y, buf, color, COLOR_BLACK);
+}
+
+static void lcd_write_status(uint16_t y, const char *msg, uint16_t color) {
+    lcd_draw_string_block(10, y, msg, color, COLOR_BLACK);
+}
+
+static void lcd_init(void) {
+    gpio_config_t io_conf = {
+        .pin_bit_mask = (1ULL << PIN_LCD_DC) | (1ULL << PIN_LCD_RST) | (1ULL << PIN_LCD_BL),
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE
+    };
+    ESP_ERROR_CHECK(gpio_config(&io_conf));
+
+    gpio_set_level(PIN_LCD_BL, 1);
+    gpio_set_level(PIN_LCD_DC, 1);
+    gpio_set_level(PIN_LCD_RST, 1);
+
+    lcd_reset_hw();
+
+    lcd_send_cmd(0x01); /* software reset */
+    vTaskDelay(pdMS_TO_TICKS(120));
+
+    lcd_send_cmd(0x11); /* sleep out */
+    vTaskDelay(pdMS_TO_TICKS(120));
+
+    lcd_send_cmd(0x3A); /* pixel format */
+    lcd_send_u8(0x55);  /* RGB565 */
+
+    lcd_send_cmd(0x36);
+    lcd_send_u8(0x28);
+
+    lcd_send_cmd(0x29); /* display on */
+    vTaskDelay(pdMS_TO_TICKS(20));
+
+    lcd_clear(COLOR_BLACK);
+}
+
+/* --------------------------- SPI setup --------------------------- */
+
+static esp_err_t spi_bus_init_once(void) {
+    if (g_spi_bus_ready) {
+        return ESP_OK;
+    }
+
     spi_bus_config_t buscfg = {
-        .mosi_io_num = -1,
+        .mosi_io_num = PIN_MOSI,
         .miso_io_num = PIN_MISO,
         .sclk_io_num = PIN_SCK,
         .quadwp_io_num = -1,
         .quadhd_io_num = -1,
-        .max_transfer_sz = 4
+        .max_transfer_sz = LCD_W * 40 * 2
     };
 
-    spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO);
+    ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO));
+    g_spi_bus_ready = true;
+    return ESP_OK;
+}
+
+static esp_err_t max31855_init(void) {
+    ESP_ERROR_CHECK(spi_bus_init_once());
 
     spi_device_interface_config_t devcfg = {
         .clock_speed_hz = 1000000,
         .mode = 0,
-        .spics_io_num = PIN_CS,
+        .spics_io_num = PIN_MAX_CS,
         .queue_size = 1,
         .flags = SPI_DEVICE_HALFDUPLEX
     };
     return spi_bus_add_device(SPI2_HOST, &devcfg, &g_maxdev);
 }
 
-static esp_err_t max31855_read_raw(uint32_t *raw_out)
-{
+static esp_err_t lcd_spi_add_device(void) {
+    ESP_ERROR_CHECK(spi_bus_init_once());
+
+    spi_device_interface_config_t devcfg = {
+        .clock_speed_hz = 26000000,
+        .mode = 0,
+        .spics_io_num = PIN_LCD_CS,
+        .queue_size = 4,
+        .flags = SPI_DEVICE_NO_DUMMY
+    };
+    return spi_bus_add_device(SPI2_HOST, &devcfg, &g_lcddev);
+}
+
+/* --------------------------- MAX31855 --------------------------- */
+
+static esp_err_t max31855_read_raw(uint32_t *raw_out) {
     uint8_t rx[4] = {0};
     spi_transaction_t t = {0};
     t.length = 0;
@@ -116,8 +458,7 @@ static esp_err_t max31855_read_raw(uint32_t *raw_out)
     return ESP_OK;
 }
 
-static float max31855_tctemp_fault(uint32_t raw, bool *fault_out)
-{
+static float max31855_tctemp_fault(uint32_t raw, bool *fault_out) {
     bool fault = (raw >> 16) & 1u;
     if (fault_out) {
         *fault_out = fault;
@@ -130,8 +471,7 @@ static float max31855_tctemp_fault(uint32_t raw, bool *fault_out)
     return (float)t14 * 0.25f;
 }
 
-static float max31855_internal(uint32_t raw)
-{
+static float max31855_internal(uint32_t raw) {
     int32_t intern_temp = (int32_t)((raw >> 4) & 0x0FFFu);
     if (intern_temp & 0x0800) {
         intern_temp |= ~0x0FFF;
@@ -139,8 +479,7 @@ static float max31855_internal(uint32_t raw)
     return (float)intern_temp * 0.0625f;
 }
 
-static sensor_packet_t collect_sensor_packet(void)
-{
+static sensor_packet_t collect_sensor_packet(void) {
     sensor_packet_t pkt;
     taskENTER_CRITICAL(&g_pkt_lock);
     pkt = g_latest_pkt;
@@ -149,8 +488,9 @@ static sensor_packet_t collect_sensor_packet(void)
     return pkt;
 }
 
-static void sensor_task(void *param)
-{
+/* --------------------------- tasks --------------------------- */
+
+static void sensor_task(void *param) {
     (void)param;
     setvbuf(stdout, NULL, _IONBF, 0);
 
@@ -213,23 +553,17 @@ static void sensor_task(void *param)
         bool tc_fault = false;
         float tc = max31855_tctemp_fault(raw_tc, &tc_fault);
         float tc_internal = max31855_internal(raw_tc);
-        uint8_t tc_fault_flags = (uint8_t)(raw_tc & 0x07u); // OC, SCG, SCV
+        uint8_t tc_fault_flags = (uint8_t)(raw_tc & 0x07u);
 
         for (uint32_t i = 0; i < num_parsed_samples; i++) {
-            if (!parsed_data[i].valid) {
-                continue;
-            }
-            if ((++decim % DECIM_N) != 0) {
-                continue;
-            }
+            if (!parsed_data[i].valid) continue;
+            if ((++decim % DECIM_N) != 0) continue;
 
             sensor_packet_t next = {
-                .seq = 0, // assigned on read/notify
+                .seq = 0,
                 .timestamp_us = (uint64_t)esp_timer_get_time(),
                 .thermocouple_c = tc,
-                // Original file publishes raw ADC value; keep same source in this field.
                 .food_probe_c = (float)parsed_data[i].raw_data,
-                // bit0: thermocouple fault present, bit1: adc sample valid
                 .control_flags = (uint8_t)((tc_fault ? 1u : 0u) | 0x02u),
                 .tc_fault_flags = tc_fault_flags,
                 .reserved = {0, 0},
@@ -248,11 +582,29 @@ static void sensor_task(void *param)
     }
 }
 
+static void lcd_task(void *param) {
+    (void)param;
+
+    ESP_ERROR_CHECK(lcd_spi_add_device());
+    lcd_init();
+
+    while (1) {
+        sensor_packet_t pkt;
+        taskENTER_CRITICAL(&g_pkt_lock);
+        pkt = g_latest_pkt;
+        taskEXIT_CRITICAL(&g_pkt_lock);
+
+        lcd_render_packet(&pkt);
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+}
+
+/* --------------------------- BLE --------------------------- */
+
 static int gatt_svr_chr_access_cb(uint16_t conn_handle,
                                   uint16_t attr_handle,
                                   struct ble_gatt_access_ctxt *ctxt,
-                                  void *arg)
-{
+                                  void *arg) {
     (void)conn_handle;
     (void)attr_handle;
     (void)arg;
@@ -279,8 +631,7 @@ static const struct ble_gatt_svc_def gatt_svcs[] = {
     {0}
 };
 
-static int ble_gap_event(struct ble_gap_event *event, void *arg)
-{
+static int ble_gap_event(struct ble_gap_event *event, void *arg) {
     (void)arg;
 
     switch (event->type) {
@@ -314,8 +665,7 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg)
     }
 }
 
-static void ble_app_advertise(void)
-{
+static void ble_app_advertise(void) {
     struct ble_gap_adv_params adv_params;
     struct ble_hs_adv_fields adv_fields;
     struct ble_hs_adv_fields rsp_fields;
@@ -347,15 +697,13 @@ static void ble_app_advertise(void)
     adv_params.conn_mode = BLE_GAP_CONN_MODE_UND;
     adv_params.disc_mode = BLE_GAP_DISC_MODE_GEN;
 
-    rc = ble_gap_adv_start(g_own_addr_type, NULL,
-                           BLE_HS_FOREVER, &adv_params, ble_gap_event, NULL);
+    rc = ble_gap_adv_start(g_own_addr_type, NULL, BLE_HS_FOREVER, &adv_params, ble_gap_event, NULL);
     if (rc != 0) {
         ESP_LOGE(TAG, "ble_gap_adv_start failed: %d", rc);
     }
 }
 
-static void ble_on_sync(void)
-{
+static void ble_on_sync(void) {
     int rc = ble_hs_id_infer_auto(0, &g_own_addr_type);
     if (rc != 0) {
         ESP_LOGE(TAG, "ble_hs_id_infer_auto failed: %d", rc);
@@ -364,15 +712,13 @@ static void ble_on_sync(void)
     ble_app_advertise();
 }
 
-static void host_task(void *param)
-{
+static void host_task(void *param) {
     (void)param;
     nimble_port_run();
     nimble_port_freertos_deinit();
 }
 
-static void notify_task(void *param)
-{
+static void notify_task(void *param) {
     (void)param;
 
     const int64_t start_us = esp_timer_get_time();
@@ -394,8 +740,7 @@ static void notify_task(void *param)
     }
 }
 
-void app_main(void)
-{
+void app_main(void) {
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
@@ -403,8 +748,9 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(ret);
 
-    nimble_port_init();
+    ESP_ERROR_CHECK(spi_bus_init_once());
 
+    nimble_port_init();
     ble_svc_gap_init();
     ble_svc_gatt_init();
 
@@ -417,6 +763,7 @@ void app_main(void)
     ble_hs_cfg.sync_cb = ble_on_sync;
 
     xTaskCreate(sensor_task, "sensor_task", 8192, NULL, 6, NULL);
+    xTaskCreate(lcd_task, "lcd_task", 6144, NULL, 4, NULL);
     nimble_port_freertos_init(host_task);
     xTaskCreate(notify_task, "notify_task", 4096, NULL, 5, NULL);
 }
