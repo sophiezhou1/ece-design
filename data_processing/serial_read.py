@@ -216,8 +216,8 @@ def main():
             temp_avg = ma_adc.update(temp_med)
             tc_med = med_tc.update(tc)
             tc_avg = ma_tc.update(tc_med)
-            # print(f"{temp_avg:.2f} {tc_avg:.2f}")
-            # plot.update_plot(t_us, temp_avg, tc_avg)
+            print(f"{temp_avg:.2f} {tc_avg:.2f}")
+            plot.update_plot(t_us, temp_avg, tc_avg)
 
             # [3] temp slope
             slope = linreg.update(t_us * 1e-6, temp_avg)
