@@ -65,6 +65,11 @@ static const char *TAG = "sensor_ble";
 #define COLOR_CYAN              0x07FF
 #define COLOR_DARKGREY          0x7BEF
 
+#define CTRL_FLAG_TC_FAULT          0x01u
+#define CTRL_FLAG_SAMPLE_VALID      0x02u
+#define CTRL_FLAG_PROBE_DISCONNECT  0x04u
+#define CTRL_FLAG_TC_DISCONNECT     0x08u
+
 static const ble_uuid128_t SENSOR_SERVICE_UUID =
     BLE_UUID128_INIT(0x78, 0x56, 0x34, 0x12, 0x9A, 0xBC, 0xDE, 0xF0,
                      0x12, 0x34, 0x56, 0x78, 0x00, 0x00, 0xEE, 0x01);
@@ -361,10 +366,16 @@ static void lcd_render_packet(const sensor_packet_t *pkt) {
     static int prev_overtemp = -1;
     static int prev_blink = -1;
 
+    static int prev_probe_disconnected = -1;
+    static int prev_tc_disconnected = -1;
+
     int meat = (int)(pkt->food_probe_c + 0.5f);
     int pan_tenths = (int)(pkt->thermocouple_c * 10.0f + (pkt->thermocouple_c >= 0 ? 0.5f : -0.5f));
     int overtemp = pkt->thermocouple_c > PAN_MAX_TEMP_C ? 1 : 0;
     int blink_on = ((esp_timer_get_time() / 350000) % 2) == 0 ? 1 : 0;
+
+    int probe_disconnected = (pkt->control_flags & CTRL_FLAG_PROBE_DISCONNECT) ? 1 : 0;
+    int tc_disconnected = (pkt->control_flags & CTRL_FLAG_TC_DISCONNECT) ? 1 : 0;
 
     if (first_draw) {
         lcd_clear(COLOR_BLACK);
@@ -376,12 +387,40 @@ static void lcd_render_packet(const sensor_packet_t *pkt) {
         first_draw = false;
     }
 
-    if (meat != prev_meat) {
+    if (probe_disconnected) {
+        if (prev_probe_disconnected != probe_disconnected || prev_blink != blink_on) {
+            uint16_t bg = blink_on ? 0x0841 : COLOR_BLACK;
+            uint16_t fg = blink_on ? COLOR_RED : 0x0841;
+            lcd_fill_rect(0, 0, LCD_W, 155, bg);
+            lcd_write_status(10, "MEAT PROBE C", COLOR_WHITE);
+            lcd_draw_string_block(65, 75, "TEMPERATURE READING DISCONNECT", fg, bg);
+        }
+    } else if (prev_probe_disconnected != probe_disconnected) {
+        lcd_fill_rect(0, 0, LCD_W, 155, 0x0841);
+        lcd_write_status(10, "MEAT PROBE C", COLOR_WHITE);
+        prev_meat = -100000;
+    }
+
+    if (!probe_disconnected && meat != prev_meat) {
         lcd_draw_number_int(22, 42, 3, meat, COLOR_GREEN, 0x0841);
         prev_meat = meat;
     }
 
-    if (pan_tenths != prev_pan_tenths) {
+    if (tc_disconnected) {
+        if (prev_tc_disconnected != tc_disconnected || prev_blink != blink_on) {
+            uint16_t bg = blink_on ? 0x10A2 : COLOR_BLACK;
+            uint16_t fg = blink_on ? COLOR_RED : 0x10A2;
+            lcd_fill_rect(0, 160, LCD_W, 40, bg);
+            lcd_write_status(170, "PAN TEMP C", COLOR_WHITE);
+            lcd_draw_string_block(200, 180, "DISCONNECT", fg, bg);
+        }
+    } else if (prev_tc_disconnected != tc_disconnected) {
+        lcd_fill_rect(0, 160, LCD_W, 40, 0x10A2);
+        lcd_write_status(170, "PAN TEMP C", COLOR_WHITE);
+        prev_pan_tenths = -100000;
+    }
+
+    if (!tc_disconnected && pan_tenths != prev_pan_tenths) {
         lcd_draw_number_1dp(170, 166, 1, pkt->thermocouple_c, COLOR_YELLOW, 0x10A2);
         prev_pan_tenths = pan_tenths;
     }
@@ -399,6 +438,9 @@ static void lcd_render_packet(const sensor_packet_t *pkt) {
 
     prev_overtemp = overtemp;
     prev_blink = blink_on;
+
+    prev_probe_disconnected = probe_disconnected;
+    prev_tc_disconnected = tc_disconnected;
 }
 
 static void lcd_init(void) {
@@ -625,12 +667,18 @@ static void sensor_task(void *param) {
             if (!parsed_data[i].valid) continue;
             if ((++decim % DECIM_N) != 0) continue;
 
+            bool probe_disconnected = (parsed_data[i].raw_data >= 4095u);
+            bool tc_disconnected = (tc_fault_flags & 0x01u) != 0;
+
             sensor_packet_t next = {
                 .seq = 0,
                 .timestamp_us = (uint64_t)esp_timer_get_time(),
                 .thermocouple_c = tc,
                 .food_probe_c = thermistor_conv((float)parsed_data[i].raw_data),
-                .control_flags = (uint8_t)((tc_fault ? 1u : 0u) | 0x02u),
+                .control_flags = (uint8_t)((tc_fault ? CTRL_FLAG_TC_FAULT : 0u) |
+                            CTRL_FLAG_SAMPLE_VALID |
+                            (probe_disconnected ? CTRL_FLAG_PROBE_DISCONNECT : 0u) |
+                            (tc_disconnected ? CTRL_FLAG_TC_DISCONNECT : 0u)),
                 .tc_fault_flags = tc_fault_flags,
                 .reserved = {0, 0},
             };
