@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <string.h>
 #include <inttypes.h>
+#include <math.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -51,6 +52,7 @@ static const char *TAG = "sensor_ble";
 #define PIN_LCD_BL              21
 #define LCD_W                   320
 #define LCD_H                   240
+#define PAN_MAX_TEMP_C          260.0f
 
 #define ADC_INPUT_GPIO          4
 
@@ -284,50 +286,12 @@ static void lcd_draw_number_int(int x, int y, int scale, int value, uint16_t col
 
     int dx = 22 * scale;
     int started = 0;
+    lcd_fill_rect(x, y, 4 * dx, 32 * scale, bg);
 
     if (d0 || started) { lcd_draw_digit7(x + 0*dx, y, scale, d0, color, bg); started = 1; }
     if (d1 || started) { lcd_draw_digit7(x + 1*dx, y, scale, d1, color, bg); started = 1; }
     if (d2 || started) { lcd_draw_digit7(x + 2*dx, y, scale, d2, color, bg); started = 1; }
     lcd_draw_digit7(x + 3*dx, y, scale, d3, color, bg);
-}
-
-static void lcd_render_packet(const sensor_packet_t *pkt) {
-    lcd_clear(COLOR_BLACK);
-
-    /* top banner */
-    lcd_fill_rect(0, 0, 320, 28, COLOR_BLUE);
-
-    /* thermocouple area */
-    lcd_fill_rect(10, 40, 300, 70, 0x0841);   // dark panel
-    lcd_draw_number_1dp(20, 52, 1, pkt->thermocouple_c, COLOR_YELLOW, 0x0841);
-    lcd_draw_bar(20, 90, 270, 10, pkt->thermocouple_c, 0.0f, 300.0f, COLOR_YELLOW);
-
-    /* food probe raw ADC area */
-    lcd_fill_rect(10, 125, 300, 70, 0x0841);
-    lcd_draw_number_int(20, 137, 1, (int)(pkt->food_probe_c + 0.5f), COLOR_GREEN, 0x0841);
-    lcd_draw_bar(20, 175, 270, 10, pkt->food_probe_c, 0.0f, 4095.0f, COLOR_GREEN);
-
-    /* status blocks */
-    if (pkt->control_flags & 0x01) {
-        lcd_fill_rect(15, 205, 70, 20, COLOR_RED);      // TC fault
-    } else {
-        lcd_fill_rect(15, 205, 70, 20, COLOR_GREEN);    // TC good
-    }
-
-    if (g_conn_handle != BLE_HS_CONN_HANDLE_NONE) {
-        if (g_notify_enabled) {
-            lcd_fill_rect(95, 205, 70, 20, COLOR_GREEN);   // BLE notify on
-        } else {
-            lcd_fill_rect(95, 205, 70, 20, COLOR_YELLOW);  // connected
-        }
-    } else {
-        lcd_fill_rect(95, 205, 70, 20, COLOR_BLUE);        // advertising
-    }
-
-    /* fault detail bits from MAX31855 */
-    if (pkt->tc_fault_flags & 0x01) lcd_fill_rect(180, 205, 18, 20, COLOR_RED);   // OC
-    if (pkt->tc_fault_flags & 0x02) lcd_fill_rect(205, 205, 18, 20, COLOR_RED);   // SCG
-    if (pkt->tc_fault_flags & 0x04) lcd_fill_rect(230, 205, 18, 20, COLOR_RED);   // SCV
 }
 
 static void lcd_draw_char_block(uint16_t x, uint16_t y, char c, uint16_t fg, uint16_t bg) {
@@ -357,6 +321,53 @@ static void lcd_write_label_value(uint16_t y, const char *label, float value, co
 
 static void lcd_write_status(uint16_t y, const char *msg, uint16_t color) {
     lcd_draw_string_block(10, y, msg, color, COLOR_BLACK);
+}
+
+static void lcd_render_packet(const sensor_packet_t *pkt) {
+    static bool first_draw = true;
+    static int prev_meat = -100000;
+    static int prev_pan_tenths = -100000;
+    static int prev_overtemp = -1;
+    static int prev_blink = -1;
+
+    int meat = (int)(pkt->food_probe_c + 0.5f);
+    int pan_tenths = (int)(pkt->thermocouple_c * 10.0f + (pkt->thermocouple_c >= 0 ? 0.5f : -0.5f));
+    int overtemp = pkt->thermocouple_c > PAN_MAX_TEMP_C ? 1 : 0;
+    int blink_on = ((esp_timer_get_time() / 350000) % 2) == 0 ? 1 : 0;
+
+    if (first_draw) {
+        lcd_clear(COLOR_BLACK);
+        lcd_fill_rect(0, 0, LCD_W, 155, 0x0841);
+        lcd_fill_rect(0, 160, LCD_W, 40, 0x10A2);
+        lcd_fill_rect(0, 205, LCD_W, 35, COLOR_BLACK);
+        lcd_write_status(10, "MEAT PROBE C", COLOR_WHITE);
+        lcd_write_status(170, "PAN TEMP C", COLOR_WHITE);
+        first_draw = false;
+    }
+
+    if (meat != prev_meat) {
+        lcd_draw_number_int(22, 42, 3, meat, COLOR_GREEN, 0x0841);
+        prev_meat = meat;
+    }
+
+    if (pan_tenths != prev_pan_tenths) {
+        lcd_draw_number_1dp(170, 166, 1, pkt->thermocouple_c, COLOR_YELLOW, 0x10A2);
+        prev_pan_tenths = pan_tenths;
+    }
+
+    if (overtemp) {
+        if (prev_overtemp != overtemp || prev_blink != blink_on) {
+            uint16_t bg = blink_on ? COLOR_RED : COLOR_YELLOW;
+            uint16_t fg = blink_on ? COLOR_WHITE : COLOR_BLACK;
+            lcd_fill_rect(0, 205, LCD_W, 35, bg);
+            lcd_draw_string_block(130, 218, "OVERTEMP", fg, bg);
+        }
+    } else if (prev_overtemp != overtemp) {
+        lcd_fill_rect(0, 205, LCD_W, 35, COLOR_BLACK);
+    }
+
+    prev_overtemp = overtemp;
+    prev_blink = blink_on;
 }
 
 static void lcd_init(void) {
@@ -493,6 +504,27 @@ static sensor_packet_t collect_sensor_packet(void) {
 
 /* --------------------------- tasks --------------------------- */
 
+static float thermistor_conv(float raw) {
+    const float ADC_MAX = 4095.0f;
+    const float RFIXED = 100000.0f;
+    const float VCC = 3.295f;
+    const float A = -0.1943e-3f;
+    const float B = 3.4023e-4f;
+    const float C = -2.3843e-7f;
+
+    int adc_raw = (int)raw;
+    if (adc_raw < 1) adc_raw = 1;
+    if (adc_raw > (int)(ADC_MAX - 1.0f)) adc_raw = (int)(ADC_MAX - 1.0f);
+
+    float vout = ((float)adc_raw) * VCC / ADC_MAX;
+    float rth = vout * RFIXED / (VCC - vout);
+    float ln_rth = logf(rth);
+    float tinv = A + B * ln_rth + C * ln_rth * ln_rth * ln_rth;
+    float temp_k = 1.0f / tinv;
+    return temp_k - 273.15f;
+}
+
+
 static void sensor_task(void *param) {
     (void)param;
     setvbuf(stdout, NULL, _IONBF, 0);
@@ -566,7 +598,7 @@ static void sensor_task(void *param) {
                 .seq = 0,
                 .timestamp_us = (uint64_t)esp_timer_get_time(),
                 .thermocouple_c = tc,
-                .food_probe_c = (float)parsed_data[i].raw_data,
+                .food_probe_c = thermistor_conv((float)parsed_data[i].raw_data),
                 .control_flags = (uint8_t)((tc_fault ? 1u : 0u) | 0x02u),
                 .tc_fault_flags = tc_fault_flags,
                 .reserved = {0, 0},
@@ -577,8 +609,8 @@ static void sensor_task(void *param) {
             taskEXIT_CRITICAL(&g_pkt_lock);
 
             ESP_LOGI(TAG,
-                     "%" PRIu64 ",adc%.0f raw_tc=0x%08" PRIX32 " tc=%.2fC intern=%.2fC fault=%d flags=0x%02X",
-                     next.timestamp_us, next.food_probe_c, raw_tc, tc, tc_internal, tc_fault, tc_fault_flags);
+                     "%" PRIu64 ",meat=%.2fC raw_adc=%" PRIu32 " raw_tc=0x%08" PRIX32 " pan=%.2fC intern=%.2fC fault=%d flags=0x%02X",
+                     next.timestamp_us, next.food_probe_c, parsed_data[i].raw_data, raw_tc, tc, tc_internal, tc_fault, tc_fault_flags);
         }
 
         vTaskDelay(pdMS_TO_TICKS(1));
@@ -598,7 +630,7 @@ static void lcd_task(void *param) {
         taskEXIT_CRITICAL(&g_pkt_lock);
 
         lcd_render_packet(&pkt);
-        vTaskDelay(pdMS_TO_TICKS(500));
+        vTaskDelay(pdMS_TO_TICKS(120));
     }
 }
 
