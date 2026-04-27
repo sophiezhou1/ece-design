@@ -304,14 +304,100 @@ static bool lcd_get_glyph_5x7(char c, uint8_t rows[7]) {
     case 'A': { uint8_t r[7] = {0x0E, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11}; memcpy(rows, r, sizeof(r)); return true; }
     case 'B': { uint8_t r[7] = {0x1E, 0x11, 0x11, 0x1E, 0x11, 0x11, 0x1E}; memcpy(rows, r, sizeof(r)); return true; }
     case 'C': { uint8_t r[7] = {0x0E, 0x11, 0x10, 0x10, 0x10, 0x11, 0x0E}; memcpy(rows, r, sizeof(r)); return true; }
+    case 'D': { uint8_t r[7] = {0x1E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x1E}; memcpy(rows, r, sizeof(r)); return true; }
     case 'E': { uint8_t r[7] = {0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x1F}; memcpy(rows, r, sizeof(r)); return true; }
+    case 'F': { uint8_t r[7] = {0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x10}; memcpy(rows, r, sizeof(r)); return true; }
+    case 'G': { uint8_t r[7] = {0x0E, 0x11, 0x10, 0x10, 0x13, 0x11, 0x0E}; memcpy(rows, r, sizeof(r)); return true; }
+    case 'H': { uint8_t r[7] = {0x11, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11}; memcpy(rows, r, sizeof(r)); return true; }
+    case 'I': { uint8_t r[7] = {0x0E, 0x04, 0x04, 0x04, 0x04, 0x04, 0x0E}; memcpy(rows, r, sizeof(r)); return true; }
+    case 'J': { uint8_t r[7] = {0x07, 0x02, 0x02, 0x02, 0x12, 0x12, 0x0C}; memcpy(rows, r, sizeof(r)); return true; }
+    case 'K': { uint8_t r[7] = {0x11, 0x12, 0x14, 0x18, 0x14, 0x12, 0x11}; memcpy(rows, r, sizeof(r)); return true; }
+    case 'L': { uint8_t r[7] = {0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x1F}; memcpy(rows, r, sizeof(r)); return true; }
     case 'M': { uint8_t r[7] = {0x11, 0x1B, 0x15, 0x15, 0x11, 0x11, 0x11}; memcpy(rows, r, sizeof(r)); return true; }
     case 'N': { uint8_t r[7] = {0x11, 0x19, 0x15, 0x13, 0x11, 0x11, 0x11}; memcpy(rows, r, sizeof(r)); return true; }
     case 'O': { uint8_t r[7] = {0x0E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E}; memcpy(rows, r, sizeof(r)); return true; }
     case 'P': { uint8_t r[7] = {0x1E, 0x11, 0x11, 0x1E, 0x10, 0x10, 0x10}; memcpy(rows, r, sizeof(r)); return true; }
+    case 'Q': { uint8_t r[7] = {0x0E, 0x11, 0x11, 0x11, 0x15, 0x12, 0x0D}; memcpy(rows, r, sizeof(r)); return true; }
     case 'R': { uint8_t r[7] = {0x1E, 0x11, 0x11, 0x1E, 0x14, 0x12, 0x11}; memcpy(rows, r, sizeof(r)); return true; }
+    case 'S': { uint8_t r[7] = {0x0F, 0x10, 0x10, 0x0E, 0x01, 0x01, 0x1E}; memcpy(rows, r, sizeof(r)); return true; }
     case 'T': { uint8_t r[7] = {0x1F, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04}; memcpy(rows, r, sizeof(r)); return true; }
+    case 'U': { uint8_t r[7] = {0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E}; memcpy(rows, r, sizeof(r)); return true; }
     case 'V': { uint8_t r[7] = {0x11, 0x11, 0x11, 0x11, 0x11, 0x0A, 0x04}; memcpy(rows, r, sizeof(r)); return true; }
+    case 'W': { uint8_t r[7] = {0x11, 0x11, 0x11, 0x15, 0x15, 0x15, 0x0A}; memcpy(rows, r, sizeof(r)); return true; }
+    case 'X': { uint8_t r[7] = {0x11, 0x11, 0x0A, 0x04, 0x0A, 0x11, 0x11}; memcpy(rows, r, sizeof(r)); return true; }
+    case 'Y': { uint8_t r[7] = {0x11, 0x11, 0x0A, 0x04, 0x04, 0x04, 0x04}; memcpy(rows, r, sizeof(r)); return true; }
+    case 'Z': { uint8_t r[7] = {0x1F, 0x01, 0x02, 0x04, 0x08, 0x10, 0x1F}; memcpy(rows, r, sizeof(r)); return true; }
+
+    case 'a': { uint8_t r[7] = {0x00, 0x00, 0x0E, 0x01, 0x0F, 0x11, 0x0F}; memcpy(rows, r, sizeof(r)); return true; }
+    case 'b': { uint8_t r[7] = {0x10, 0x10, 0x1E, 0x11, 0x11, 0x11, 0x1E}; memcpy(rows, r, sizeof(r)); return true; }
+    case 'c': { uint8_t r[7] = {0x00, 0x00, 0x0E, 0x10, 0x10, 0x11, 0x0E}; memcpy(rows, r, sizeof(r)); return true; }
+    case 'd': { uint8_t r[7] = {0x01, 0x01, 0x0F, 0x11, 0x11, 0x11, 0x0F}; memcpy(rows, r, sizeof(r)); return true; }
+    case 'e': { uint8_t r[7] = {0x00, 0x00, 0x0E, 0x11, 0x1F, 0x10, 0x0E}; memcpy(rows, r, sizeof(r)); return true; }
+    case 'f': { uint8_t r[7] = {0x06, 0x08, 0x08, 0x1E, 0x08, 0x08, 0x08}; memcpy(rows, r, sizeof(r)); return true; }
+    case 'g': { uint8_t r[7] = {0x00, 0x00, 0x0F, 0x11, 0x0F, 0x01, 0x0E}; memcpy(rows, r, sizeof(r)); return true; }
+    case 'h': { uint8_t r[7] = {0x10, 0x10, 0x1E, 0x11, 0x11, 0x11, 0x11}; memcpy(rows, r, sizeof(r)); return true; }
+    case 'i': { uint8_t r[7] = {0x04, 0x00, 0x0C, 0x04, 0x04, 0x04, 0x0E}; memcpy(rows, r, sizeof(r)); return true; }
+    case 'j': { uint8_t r[7] = {0x02, 0x00, 0x06, 0x02, 0x02, 0x12, 0x0C}; memcpy(rows, r, sizeof(r)); return true; }
+    case 'k': { uint8_t r[7] = {0x10, 0x10, 0x12, 0x14, 0x18, 0x14, 0x12}; memcpy(rows, r, sizeof(r)); return true; }
+    case 'l': { uint8_t r[7] = {0x0C, 0x04, 0x04, 0x04, 0x04, 0x04, 0x0E}; memcpy(rows, r, sizeof(r)); return true; }
+    case 'm': { uint8_t r[7] = {0x00, 0x00, 0x1A, 0x15, 0x15, 0x15, 0x15}; memcpy(rows, r, sizeof(r)); return true; }
+    case 'n': { uint8_t r[7] = {0x00, 0x00, 0x1E, 0x11, 0x11, 0x11, 0x11}; memcpy(rows, r, sizeof(r)); return true; }
+    case 'o': { uint8_t r[7] = {0x00, 0x00, 0x0E, 0x11, 0x11, 0x11, 0x0E}; memcpy(rows, r, sizeof(r)); return true; }
+    case 'p': { uint8_t r[7] = {0x00, 0x00, 0x1E, 0x11, 0x1E, 0x10, 0x10}; memcpy(rows, r, sizeof(r)); return true; }
+    case 'q': { uint8_t r[7] = {0x00, 0x00, 0x0F, 0x11, 0x0F, 0x01, 0x01}; memcpy(rows, r, sizeof(r)); return true; }
+    case 'r': { uint8_t r[7] = {0x00, 0x00, 0x16, 0x19, 0x10, 0x10, 0x10}; memcpy(rows, r, sizeof(r)); return true; }
+    case 's': { uint8_t r[7] = {0x00, 0x00, 0x0F, 0x10, 0x0E, 0x01, 0x1E}; memcpy(rows, r, sizeof(r)); return true; }
+    case 't': { uint8_t r[7] = {0x08, 0x08, 0x1E, 0x08, 0x08, 0x09, 0x06}; memcpy(rows, r, sizeof(r)); return true; }
+    case 'u': { uint8_t r[7] = {0x00, 0x00, 0x11, 0x11, 0x11, 0x13, 0x0D}; memcpy(rows, r, sizeof(r)); return true; }
+    case 'v': { uint8_t r[7] = {0x00, 0x00, 0x11, 0x11, 0x11, 0x0A, 0x04}; memcpy(rows, r, sizeof(r)); return true; }
+    case 'w': { uint8_t r[7] = {0x00, 0x00, 0x11, 0x15, 0x15, 0x15, 0x0A}; memcpy(rows, r, sizeof(r)); return true; }
+    case 'x': { uint8_t r[7] = {0x00, 0x00, 0x11, 0x0A, 0x04, 0x0A, 0x11}; memcpy(rows, r, sizeof(r)); return true; }
+    case 'y': { uint8_t r[7] = {0x00, 0x00, 0x11, 0x11, 0x0F, 0x01, 0x0E}; memcpy(rows, r, sizeof(r)); return true; }
+    case 'z': { uint8_t r[7] = {0x00, 0x00, 0x1F, 0x02, 0x04, 0x08, 0x1F}; memcpy(rows, r, sizeof(r)); return true; }
+
+    case '0': { uint8_t r[7] = {0x0E, 0x11, 0x13, 0x15, 0x19, 0x11, 0x0E}; memcpy(rows, r, sizeof(r)); return true; }
+    case '1': { uint8_t r[7] = {0x04, 0x0C, 0x14, 0x04, 0x04, 0x04, 0x1F}; memcpy(rows, r, sizeof(r)); return true; }
+    case '2': { uint8_t r[7] = {0x0E, 0x11, 0x01, 0x02, 0x04, 0x08, 0x1F}; memcpy(rows, r, sizeof(r)); return true; }
+    case '3': { uint8_t r[7] = {0x0E, 0x11, 0x01, 0x06, 0x01, 0x11, 0x0E}; memcpy(rows, r, sizeof(r)); return true; }
+    case '4': { uint8_t r[7] = {0x02, 0x06, 0x0A, 0x12, 0x1F, 0x02, 0x02}; memcpy(rows, r, sizeof(r)); return true; }
+    case '5': { uint8_t r[7] = {0x1F, 0x10, 0x1E, 0x01, 0x01, 0x11, 0x0E}; memcpy(rows, r, sizeof(r)); return true; }
+    case '6': { uint8_t r[7] = {0x06, 0x08, 0x10, 0x1E, 0x11, 0x11, 0x0E}; memcpy(rows, r, sizeof(r)); return true; }
+    case '7': { uint8_t r[7] = {0x1F, 0x01, 0x02, 0x04, 0x08, 0x08, 0x08}; memcpy(rows, r, sizeof(r)); return true; }
+    case '8': { uint8_t r[7] = {0x0E, 0x11, 0x11, 0x0E, 0x11, 0x11, 0x0E}; memcpy(rows, r, sizeof(r)); return true; }
+    case '9': { uint8_t r[7] = {0x0E, 0x11, 0x11, 0x0F, 0x01, 0x02, 0x0C}; memcpy(rows, r, sizeof(r)); return true; }
+
+    case '!': { uint8_t r[7] = {0x04, 0x04, 0x04, 0x04, 0x04, 0x00, 0x04}; memcpy(rows, r, sizeof(r)); return true; }
+    case '"': { uint8_t r[7] = {0x0A, 0x0A, 0x0A, 0x00, 0x00, 0x00, 0x00}; memcpy(rows, r, sizeof(r)); return true; }
+    case '#': { uint8_t r[7] = {0x0A, 0x0A, 0x1F, 0x0A, 0x1F, 0x0A, 0x0A}; memcpy(rows, r, sizeof(r)); return true; }
+    case '$': { uint8_t r[7] = {0x04, 0x0F, 0x14, 0x0E, 0x05, 0x1E, 0x04}; memcpy(rows, r, sizeof(r)); return true; }
+    case '%': { uint8_t r[7] = {0x19, 0x19, 0x02, 0x04, 0x08, 0x13, 0x13}; memcpy(rows, r, sizeof(r)); return true; }
+    case '&': { uint8_t r[7] = {0x0C, 0x12, 0x14, 0x08, 0x15, 0x12, 0x0D}; memcpy(rows, r, sizeof(r)); return true; }
+    case '\'': { uint8_t r[7] = {0x04, 0x04, 0x08, 0x00, 0x00, 0x00, 0x00}; memcpy(rows, r, sizeof(r)); return true; }
+    case '(': { uint8_t r[7] = {0x02, 0x04, 0x08, 0x08, 0x08, 0x04, 0x02}; memcpy(rows, r, sizeof(r)); return true; }
+    case ')': { uint8_t r[7] = {0x08, 0x04, 0x02, 0x02, 0x02, 0x04, 0x08}; memcpy(rows, r, sizeof(r)); return true; }
+    case '*': { uint8_t r[7] = {0x00, 0x04, 0x15, 0x0E, 0x15, 0x04, 0x00}; memcpy(rows, r, sizeof(r)); return true; }
+    case '+': { uint8_t r[7] = {0x00, 0x04, 0x04, 0x1F, 0x04, 0x04, 0x00}; memcpy(rows, r, sizeof(r)); return true; }
+    case ',': { uint8_t r[7] = {0x00, 0x00, 0x00, 0x00, 0x04, 0x04, 0x08}; memcpy(rows, r, sizeof(r)); return true; }
+    case '-': { uint8_t r[7] = {0x00, 0x00, 0x00, 0x1F, 0x00, 0x00, 0x00}; memcpy(rows, r, sizeof(r)); return true; }
+    case '.': { uint8_t r[7] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04}; memcpy(rows, r, sizeof(r)); return true; }
+    case '/': { uint8_t r[7] = {0x01, 0x01, 0x02, 0x04, 0x08, 0x10, 0x10}; memcpy(rows, r, sizeof(r)); return true; }
+    case ':': { uint8_t r[7] = {0x00, 0x04, 0x00, 0x00, 0x04, 0x00, 0x00}; memcpy(rows, r, sizeof(r)); return true; }
+    case ';': { uint8_t r[7] = {0x00, 0x04, 0x00, 0x00, 0x04, 0x04, 0x08}; memcpy(rows, r, sizeof(r)); return true; }
+    case '<': { uint8_t r[7] = {0x01, 0x02, 0x04, 0x08, 0x04, 0x02, 0x01}; memcpy(rows, r, sizeof(r)); return true; }
+    case '=': { uint8_t r[7] = {0x00, 0x00, 0x1F, 0x00, 0x1F, 0x00, 0x00}; memcpy(rows, r, sizeof(r)); return true; }
+    case '>': { uint8_t r[7] = {0x10, 0x08, 0x04, 0x02, 0x04, 0x08, 0x10}; memcpy(rows, r, sizeof(r)); return true; }
+    case '?': { uint8_t r[7] = {0x0E, 0x11, 0x01, 0x02, 0x04, 0x00, 0x04}; memcpy(rows, r, sizeof(r)); return true; }
+    case '@': { uint8_t r[7] = {0x0E, 0x11, 0x15, 0x1D, 0x10, 0x11, 0x0E}; memcpy(rows, r, sizeof(r)); return true; }
+    case '[': { uint8_t r[7] = {0x0E, 0x08, 0x08, 0x08, 0x08, 0x08, 0x0E}; memcpy(rows, r, sizeof(r)); return true; }
+    case '\\': { uint8_t r[7] = {0x10, 0x10, 0x08, 0x04, 0x02, 0x01, 0x01}; memcpy(rows, r, sizeof(r)); return true; }
+    case ']': { uint8_t r[7] = {0x0E, 0x02, 0x02, 0x02, 0x02, 0x02, 0x0E}; memcpy(rows, r, sizeof(r)); return true; }
+    case '^': { uint8_t r[7] = {0x04, 0x0A, 0x11, 0x00, 0x00, 0x00, 0x00}; memcpy(rows, r, sizeof(r)); return true; }
+    case '_': { uint8_t r[7] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1F}; memcpy(rows, r, sizeof(r)); return true; }
+    case '`': { uint8_t r[7] = {0x08, 0x04, 0x02, 0x00, 0x00, 0x00, 0x00}; memcpy(rows, r, sizeof(r)); return true; }
+    case '{': { uint8_t r[7] = {0x02, 0x04, 0x04, 0x08, 0x04, 0x04, 0x02}; memcpy(rows, r, sizeof(r)); return true; }
+    case '|': { uint8_t r[7] = {0x04, 0x04, 0x04, 0x00, 0x04, 0x04, 0x04}; memcpy(rows, r, sizeof(r)); return true; }
+    case '}': { uint8_t r[7] = {0x08, 0x04, 0x04, 0x02, 0x04, 0x04, 0x08}; memcpy(rows, r, sizeof(r)); return true; }
+    case '~': { uint8_t r[7] = {0x00, 0x00, 0x09, 0x16, 0x00, 0x00, 0x00}; memcpy(rows, r, sizeof(r)); return true; }
     case ' ': { uint8_t r[7] = {0, 0, 0, 0, 0, 0, 0}; memcpy(rows, r, sizeof(r)); return true; }
     default:
         return false; 
@@ -375,7 +461,7 @@ static void lcd_render_packet(const sensor_packet_t *pkt) {
     int blink_on = ((esp_timer_get_time() / 350000) % 2) == 0 ? 1 : 0;
 
     int probe_disconnected = (pkt->control_flags & CTRL_FLAG_PROBE_DISCONNECT) ? 1 : 0;
-    int tc_disconnected = (pkt->control_flags & CTRL_FLAG_TC_DISCONNECT) ? 1 : 0;
+    int tc_disconnected = ((pkt->control_flags & CTRL_FLAG_TC_DISCONNECT) || (pkt->thermocouple_c <= 0.0f)) ? 1 : 0;
 
     if (first_draw) {
         lcd_clear(COLOR_BLACK);
@@ -393,7 +479,7 @@ static void lcd_render_packet(const sensor_packet_t *pkt) {
             uint16_t fg = blink_on ? COLOR_RED : 0x0841;
             lcd_fill_rect(0, 0, LCD_W, 155, bg);
             lcd_write_status(10, "MEAT PROBE C", COLOR_WHITE);
-            lcd_draw_string_block(65, 75, "TEMPERATURE READING DISCONNECT", fg, bg);
+            lcd_draw_string_block(65, 75, "FOOD PROBE DISCONNECT", fg, bg);
         }
     } else if (prev_probe_disconnected != probe_disconnected) {
         lcd_fill_rect(0, 0, LCD_W, 155, 0x0841);
@@ -412,7 +498,7 @@ static void lcd_render_packet(const sensor_packet_t *pkt) {
             uint16_t fg = blink_on ? COLOR_RED : 0x10A2;
             lcd_fill_rect(0, 160, LCD_W, 40, bg);
             lcd_write_status(170, "PAN TEMP C", COLOR_WHITE);
-            lcd_draw_string_block(200, 180, "DISCONNECT", fg, bg);
+            lcd_draw_string_block(100, 180, "PAN TEMPERATURE DISCONNECT", fg, bg);
         }
     } else if (prev_tc_disconnected != tc_disconnected) {
         lcd_fill_rect(0, 160, LCD_W, 40, 0x10A2);
@@ -668,7 +754,7 @@ static void sensor_task(void *param) {
             if ((++decim % DECIM_N) != 0) continue;
 
             bool probe_disconnected = (parsed_data[i].raw_data >= 4095u);
-            bool tc_disconnected = (tc_fault_flags & 0x01u) != 0;
+            bool tc_disconnected = ((tc_fault_flags & 0x01u) != 0) || (tc <= 0.0f);
 
             sensor_packet_t next = {
                 .seq = 0,
