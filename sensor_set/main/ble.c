@@ -422,6 +422,32 @@ static void lcd_draw_char_block(uint16_t x, uint16_t y, char c, uint16_t fg, uin
     }
 }
 
+static void lcd_draw_char_block_scaled(uint16_t x, uint16_t y, char c, uint8_t scale,
+                                       uint16_t fg, uint16_t bg) {
+    if (scale <= 1) {
+        lcd_draw_char_block(x, y, c, fg, bg);
+        return;
+    }
+
+    uint8_t rows[7] = {0};
+    bool has_glyph = lcd_get_glyph_5x7(c, rows);
+    uint16_t cw = (uint16_t)(6 * scale);
+    uint16_t ch = (uint16_t)(8 * scale);
+    lcd_fill_rect(x, y, cw, ch, bg);
+    if (!has_glyph) {
+        return;
+    }
+
+    for (int ry = 0; ry < 7; ry++) {
+        for (int rx = 0; rx < 5; rx++) {
+            if (rows[ry] & (1u << (4 - rx))) {
+                lcd_fill_rect((uint16_t)(x + rx * scale), (uint16_t)(y + ry * scale),
+                              scale, scale, fg);
+            }
+        }
+    }
+}
+
 static void lcd_draw_string_block(uint16_t x, uint16_t y, const char *s, uint16_t fg, uint16_t bg) {
     while (*s) {
         if (*s == ' ') {
@@ -433,6 +459,16 @@ static void lcd_draw_string_block(uint16_t x, uint16_t y, const char *s, uint16_
         s++;
     }
 }
+
+static void lcd_draw_string_block_scaled(uint16_t x, uint16_t y, const char *s, uint8_t scale,
+                                         uint16_t fg, uint16_t bg) {
+    while (*s) {
+        lcd_draw_char_block_scaled(x, y, *s, scale, fg, bg);
+        x = (uint16_t)(x + 6 * scale);
+        s++;
+    }
+}
+
 
 static void lcd_write_label_value(uint16_t y, const char *label, float value, const char *unit,
                                   uint16_t color) {
@@ -476,10 +512,11 @@ static void lcd_render_packet(const sensor_packet_t *pkt) {
     if (probe_disconnected) {
         if (prev_probe_disconnected != probe_disconnected || prev_blink != blink_on) {
             uint16_t bg = blink_on ? 0x0841 : COLOR_BLACK;
-            uint16_t fg = blink_on ? COLOR_RED : 0x0841;
+            uint16_t fg = COLOR_RED;
             lcd_fill_rect(0, 0, LCD_W, 155, bg);
             lcd_write_status(10, "MEAT PROBE C", COLOR_WHITE);
-            lcd_draw_string_block(65, 75, "FOOD PROBE DISCONNECT", fg, bg);
+            // lcd_draw_string_block(65, 75, "FOOD PROBE DISCONNECT", fg, bg);
+            lcd_draw_string_block_scaled(70, 70, "DISCONNECT", 2, fg, bg);
         }
     } else if (prev_probe_disconnected != probe_disconnected) {
         lcd_fill_rect(0, 0, LCD_W, 155, 0x0841);
@@ -495,10 +532,11 @@ static void lcd_render_packet(const sensor_packet_t *pkt) {
     if (tc_disconnected) {
         if (prev_tc_disconnected != tc_disconnected || prev_blink != blink_on) {
             uint16_t bg = blink_on ? 0x10A2 : COLOR_BLACK;
-            uint16_t fg = blink_on ? COLOR_RED : 0x10A2;
+            uint16_t fg = COLOR_RED;
             lcd_fill_rect(0, 160, LCD_W, 40, bg);
             lcd_write_status(170, "PAN TEMP C", COLOR_WHITE);
-            lcd_draw_string_block(100, 180, "PAN TEMPERATURE DISCONNECT", fg, bg);
+            // lcd_draw_string_block(100, 180, "PAN TEMPERATURE DISCONNECT", fg, bg);
+            lcd_draw_string_block_scaled(100, 170, "DISCONNECT", 3, fg, bg);
         }
     } else if (prev_tc_disconnected != tc_disconnected) {
         lcd_fill_rect(0, 160, LCD_W, 40, 0x10A2);
