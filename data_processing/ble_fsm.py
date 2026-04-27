@@ -1,9 +1,3 @@
-#!/usr/bin/env python3
-"""BLE reader with app-oriented data structures and processing pipeline.
-
-This mirrors the old serial processing flow but consumes BLE notifications.
-"""
-
 import argparse
 import asyncio
 import math

@@ -1,168 +1,168 @@
-// // adc
-// #include <stdio.h>
-// #include <inttypes.h>
-// #include "driver/spi_common.h"
-// #include "freertos/FreeRTOS.h"
-// #include "freertos/task.h"
-// #include "esp_adc/adc_continuous.h"
-// #include "esp_err.h"
-// #include "hal/adc_types.h"
-// #include "hal/spi_types.h"
-// #include "lwip/err.h"
-// #include "soc/gpio_num.h"
-// #include "esp_timer.h"
+// adc
+#include <stdio.h>
+#include <inttypes.h>
+#include "driver/spi_common.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "esp_adc/adc_continuous.h"
+#include "esp_err.h"
+#include "hal/adc_types.h"
+#include "hal/spi_types.h"
+#include "lwip/err.h"
+#include "soc/gpio_num.h"
+#include "esp_timer.h"
 
 
-// // spi
-// #include <stdint.h>
-// #include <string.h>
-// #include "driver/spi_master.h"
-// #include "driver/gpio.h"
-// #include "esp_log.h"
+// spi
+#include <stdint.h>
+#include <string.h>
+#include "driver/spi_master.h"
+#include "driver/gpio.h"
+#include "esp_log.h"
 
-// #define PIN_SCK   12
-// #define PIN_MISO  13
-// #define PIN_CS    10
+#define PIN_SCK   12
+#define PIN_MISO  13
+#define PIN_CS    10
 
-// static spi_device_handle_t maxdev = NULL;
-// esp_err_t err;
+static spi_device_handle_t maxdev = NULL;
+esp_err_t err;
 
-// static esp_err_t max31855_init(void) {
-//     spi_bus_config_t buscfg = {
-//         .mosi_io_num = -1, // not used
-//         .miso_io_num = PIN_MISO,
-//         .sclk_io_num = PIN_SCK,
-//         .quadwp_io_num = -1,
-//         .quadhd_io_num = -1,
-//         .max_transfer_sz = 4
-//     };
+static esp_err_t max31855_init(void) {
+    spi_bus_config_t buscfg = {
+        .mosi_io_num = -1, // not used
+        .miso_io_num = PIN_MISO,
+        .sclk_io_num = PIN_SCK,
+        .quadwp_io_num = -1,
+        .quadhd_io_num = -1,
+        .max_transfer_sz = 4
+    };
 
-//     ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO));
+    ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO));
 
-//     spi_device_interface_config_t devcfg = {
-//         .clock_speed_hz = 1000000,
-//         .mode = 0,
-//         .spics_io_num = PIN_CS,
-//         .queue_size = 1,
-//         .flags = SPI_DEVICE_HALFDUPLEX
-//     };
-//     err = spi_bus_add_device(SPI2_HOST, &devcfg, &maxdev);
-//     return err;
-// }
+    spi_device_interface_config_t devcfg = {
+        .clock_speed_hz = 1000000,
+        .mode = 0,
+        .spics_io_num = PIN_CS,
+        .queue_size = 1,
+        .flags = SPI_DEVICE_HALFDUPLEX
+    };
+    err = spi_bus_add_device(SPI2_HOST, &devcfg, &maxdev);
+    return err;
+}
 
-// static esp_err_t max31855_read_raw(uint32_t *raw_out) {
-//     uint8_t rx[4] = {0};
+static esp_err_t max31855_read_raw(uint32_t *raw_out) {
+    uint8_t rx[4] = {0};
 
-//     spi_transaction_t t;
-//     memset(&t, 0, sizeof(t));
+    spi_transaction_t t;
+    memset(&t, 0, sizeof(t));
 
-//     t.length = 0;
-//     t.rxlength = 32;
-//     t.tx_buffer = NULL;
-//     t.rx_buffer = rx;
+    t.length = 0;
+    t.rxlength = 32;
+    t.tx_buffer = NULL;
+    t.rx_buffer = rx;
 
-//     esp_err_t err = spi_device_transmit(maxdev, &t);
-//     if (err != ERR_OK) return err;
+    esp_err_t err = spi_device_transmit(maxdev, &t);
+    if (err != ERR_OK) return err;
 
-//     // msb first
-//     uint32_t raw = ((uint32_t)rx[0] << 24) |
-//                    ((uint32_t)rx[1] << 16) |
-//                    ((uint32_t)rx[2] <<  8) |
-//                    ((uint32_t)rx[3] <<  0);
+    // msb first
+    uint32_t raw = ((uint32_t)rx[0] << 24) |
+                   ((uint32_t)rx[1] << 16) |
+                   ((uint32_t)rx[2] <<  8) |
+                   ((uint32_t)rx[3] <<  0);
 
-//     *raw_out = raw;
-//     return ERR_OK;
-// }
+    *raw_out = raw;
+    return ERR_OK;
+}
 
-// static float max31855_tctemp_fault(uint32_t raw, bool *fault_out) {
-//     // fault bit 16 (true if scv | scg | oc)
-//     bool fault = (raw >> 16) & 1u;
-//     if (fault_out) *fault_out = fault;
+static float max31855_tctemp_fault(uint32_t raw, bool *fault_out) {
+    // fault bit 16 (true if scv | scg | oc)
+    bool fault = (raw >> 16) & 1u;
+    if (fault_out) *fault_out = fault;
 
-//     // thermocouple temp bits [31:18]
-//     // 6400 digital out = 1600 C (0.25 C per LSB)
-//     int32_t t14 = (int32_t)((raw >> 18) & 0x3FFFu); // 18 bit shift, mask to 14 bits
-//     if (t14 & 0x2000) t14 |= ~0x3FFF;   // sign-extend
-//     return (float)t14 * 0.25f;
-// }
+    // thermocouple temp bits [31:18]
+    // 6400 digital out = 1600 C (0.25 C per LSB)
+    int32_t t14 = (int32_t)((raw >> 18) & 0x3FFFu); // 18 bit shift, mask to 14 bits
+    if (t14 & 0x2000) t14 |= ~0x3FFF;   // sign-extend
+    return (float)t14 * 0.25f;
+}
 
-// static float max31855_internal(uint32_t raw) {
-//     // internal temp bits [15:4]
-//     // 2032 digital out = 127 C (0.0625 C per LSB)
-//     int32_t intern_temp = (int32_t)((raw >> 4) & 0x0FFFu); // 4 bit shift, mask to 12 bits
-//     if (intern_temp & 0x0800) intern_temp |= ~0x0FFF;
-//     return (float)intern_temp * 0.0625f;
-// }
+static float max31855_internal(uint32_t raw) {
+    // internal temp bits [15:4]
+    // 2032 digital out = 127 C (0.0625 C per LSB)
+    int32_t intern_temp = (int32_t)((raw >> 4) & 0x0FFFu); // 4 bit shift, mask to 12 bits
+    if (intern_temp & 0x0800) intern_temp |= ~0x0FFF;
+    return (float)intern_temp * 0.0625f;
+}
 
 
-// /*
-// !!! CENTER RAIL IS 5V !!!
-// esp32 [4] -> uln in [1] -> uln out [18] -> stepper (blue)
-// esp32 [5] -> uln in [2] -> uln out [17] -> stepper (pink)
-// esp32 [6] -> uln in [3] -> uln out [16] -> stepper (yellow)
-// esp32 [7] -> uln in [4] -> uln out [15] -> stepper (orange)
-// uln [10] -> stepper 5V (red)
-// uln [9] -> GND
-// */
+/*
+!!! CENTER RAIL IS 5V !!!
+esp32 [4] -> uln in [1] -> uln out [18] -> stepper (blue)
+esp32 [5] -> uln in [2] -> uln out [17] -> stepper (pink)
+esp32 [6] -> uln in [3] -> uln out [16] -> stepper (yellow)
+esp32 [7] -> uln in [4] -> uln out [15] -> stepper (orange)
+uln [10] -> stepper 5V (red)
+uln [9] -> GND
+*/
 
-// // static const int pins[4] = {4, 5, 6, 7};
+// static const int pins[4] = {4, 5, 6, 7};
 
-// static const int steps[4][4] = {
-//     {1,0,0,0},
-//     {0,1,0,0},
-//     {0,0,1,0},
-//     {0,0,0,1}
-// };
+static const int steps[4][4] = {
+    {1,0,0,0},
+    {0,1,0,0},
+    {0,0,1,0},
+    {0,0,0,1}
+};
 
-// int step_counter = 0;
+int step_counter = 0;
 
-// // void app_main(void)
-// // {
-// //     gpio_config_t io_conf = {
-// //         .pin_bit_mask = (1ULL << 4) | (1ULL << 5) | (1ULL << 6) | (1ULL << 7),
-// //         .mode = GPIO_MODE_OUTPUT,
-// //         .pull_up_en = GPIO_PULLUP_DISABLE,
-// //         .pull_down_en = GPIO_PULLDOWN_DISABLE,
-// //         .intr_type = GPIO_INTR_DISABLE
-// //     };
-// //     gpio_config(&io_conf);
-// //     step_counter = 0;
+void app_main(void)
+{
+    gpio_config_t io_conf = {
+        .pin_bit_mask = (1ULL << 15) | (1ULL << 16) | (1ULL << 17) | (1ULL << 18),
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE
+    };
+    gpio_config(&io_conf);
+    step_counter = 0;
 
-// //     // 1800 steps for startup + 1 rotation
-// //     while (step_counter < 1800) {
-// //         for (int s = 0; s < 4; s++) {
-// //             gpio_set_level(4, steps[s][0]);
-// //             step_counter++;
-// //             gpio_set_level(5, steps[s][1]);
-// //             step_counter++;
-// //             gpio_set_level(6, steps[s][2]);
-// //             step_counter++;
-// //             gpio_set_level(7, steps[s][3]);
-// //             step_counter++;
-// //             vTaskDelay(pdMS_TO_TICKS(20));
-// //             // printf("%d      ", step_counter);
-// //         }
-// //     }
+    // 1800 steps for startup + 1 rotation
+    while (step_counter < 1800) {
+        for (int s = 0; s < 4; s++) {
+            gpio_set_level(15, steps[s][0]);
+            step_counter++;
+            gpio_set_level(16, steps[s][1]);
+            step_counter++;
+            gpio_set_level(17, steps[s][2]);
+            step_counter++;
+            gpio_set_level(18, steps[s][3]);
+            step_counter++;
+            vTaskDelay(pdMS_TO_TICKS(20));
+            // printf("%d      ", step_counter);
+        }
+    }
 
-// //     printf("break");
-// //     step_counter = 0;
+    printf("break");
+    step_counter = 0;
 
-// //     // 2050 for regular full rotation
-// //     while (step_counter < 5) {
-// //         for (int s = 0; s < 4; s++) {
-// //             gpio_set_level(4, steps[s][0]);
-// //             step_counter++;
-// //             gpio_set_level(5, steps[s][1]);
-// //             step_counter++;
-// //             gpio_set_level(6, steps[s][2]);
-// //             step_counter++;
-// //             gpio_set_level(7, steps[s][3]);
-// //             step_counter++;
-// //             vTaskDelay(pdMS_TO_TICKS(20));
-// //             printf("%d      ", step_counter);
-// //         }
-// //     }
-// // }
+    // 2050 for regular full rotation
+    while (step_counter < 5) {
+        for (int s = 0; s < 4; s++) {
+            gpio_set_level(15, steps[s][0]);
+            step_counter++;
+            gpio_set_level(16, steps[s][1]);
+            step_counter++;
+            gpio_set_level(17, steps[s][2]);
+            step_counter++;
+            gpio_set_level(18, steps[s][3]);
+            step_counter++;
+            vTaskDelay(pdMS_TO_TICKS(20));
+            printf("%d      ", step_counter);
+        }
+    }
+}
 
 
 // void app_main(void)

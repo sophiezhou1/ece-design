@@ -34,22 +34,25 @@ static const char *TAG = "sensor_ble";
 #define SESSION_DURATION_MS     (60 * 60 * 1000)
 
 /* Shared SPI bus pins from your pinout */
+// #define PIN_SCK                 12
+// #define PIN_MISO                13
+// #define PIN_MOSI                11
 #define PIN_SCK                 12
-#define PIN_MISO                13
+#define PIN_MISO                10
 #define PIN_MOSI                11
 
 /* MAX31855 */
-#define PIN_MAX_CS              10
+#define PIN_MAX_CS              9
 
 /* LCD */
-#define PIN_LCD_CS              14
-#define PIN_LCD_DC              15
-#define PIN_LCD_RST             16
-#define PIN_LCD_BL              17
+#define PIN_LCD_CS              16
+#define PIN_LCD_DC              7
+#define PIN_LCD_RST             6
+#define PIN_LCD_BL              21
 #define LCD_W                   320
 #define LCD_H                   240
 
-#define ADC_INPUT_GPIO          GPIO_NUM_1
+#define ADC_INPUT_GPIO          4
 
 #define COLOR_BLACK             0x0000
 #define COLOR_WHITE             0xFFFF
@@ -428,7 +431,7 @@ static esp_err_t lcd_spi_add_device(void) {
     ESP_ERROR_CHECK(spi_bus_init_once());
 
     spi_device_interface_config_t devcfg = {
-        .clock_speed_hz = 26000000,
+        .clock_speed_hz = 10000000,
         .mode = 0,
         .spics_io_num = PIN_LCD_CS,
         .queue_size = 4,
