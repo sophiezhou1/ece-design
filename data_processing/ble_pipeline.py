@@ -145,7 +145,8 @@ class Pipeline:
     def process_packet(self, pkt: BlePacket) -> TelemetryState:
         # raw probe from BLE payload -> temp conversion
         adc_raw_int = int(pkt.food_probe_raw)
-        temp = self.thermistor_conv(pkt.food_probe_raw)
+        # temp = self.thermistor_conv(pkt.food_probe_raw)
+        temp = pkt.food_probe_raw
 
         sample = SensorData(pkt.t_us, temp, pkt.tc_c)
         self.history.append(sample)

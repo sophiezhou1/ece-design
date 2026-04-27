@@ -52,7 +52,7 @@ static const char *TAG = "sensor_ble";
 #define PIN_LCD_BL              21
 #define LCD_W                   320
 #define LCD_H                   240
-#define PAN_MAX_TEMP_C          260.0f
+#define PAN_MAX_TEMP_C          35.0f
 
 #define ADC_INPUT_GPIO          4
 
@@ -294,10 +294,41 @@ static void lcd_draw_number_int(int x, int y, int scale, int value, uint16_t col
     lcd_draw_digit7(x + 3*dx, y, scale, d3, color, bg);
 }
 
+static bool lcd_get_glyph_5x7(char c, uint8_t rows[7]) {
+    switch (c) {
+    case 'A': { uint8_t r[7] = {0x0E, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11}; memcpy(rows, r, sizeof(r)); return true; }
+    case 'B': { uint8_t r[7] = {0x1E, 0x11, 0x11, 0x1E, 0x11, 0x11, 0x1E}; memcpy(rows, r, sizeof(r)); return true; }
+    case 'C': { uint8_t r[7] = {0x0E, 0x11, 0x10, 0x10, 0x10, 0x11, 0x0E}; memcpy(rows, r, sizeof(r)); return true; }
+    case 'E': { uint8_t r[7] = {0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x1F}; memcpy(rows, r, sizeof(r)); return true; }
+    case 'M': { uint8_t r[7] = {0x11, 0x1B, 0x15, 0x15, 0x11, 0x11, 0x11}; memcpy(rows, r, sizeof(r)); return true; }
+    case 'N': { uint8_t r[7] = {0x11, 0x19, 0x15, 0x13, 0x11, 0x11, 0x11}; memcpy(rows, r, sizeof(r)); return true; }
+    case 'O': { uint8_t r[7] = {0x0E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E}; memcpy(rows, r, sizeof(r)); return true; }
+    case 'P': { uint8_t r[7] = {0x1E, 0x11, 0x11, 0x1E, 0x10, 0x10, 0x10}; memcpy(rows, r, sizeof(r)); return true; }
+    case 'R': { uint8_t r[7] = {0x1E, 0x11, 0x11, 0x1E, 0x14, 0x12, 0x11}; memcpy(rows, r, sizeof(r)); return true; }
+    case 'T': { uint8_t r[7] = {0x1F, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04}; memcpy(rows, r, sizeof(r)); return true; }
+    case 'V': { uint8_t r[7] = {0x11, 0x11, 0x11, 0x11, 0x11, 0x0A, 0x04}; memcpy(rows, r, sizeof(r)); return true; }
+    case ' ': { uint8_t r[7] = {0, 0, 0, 0, 0, 0, 0}; memcpy(rows, r, sizeof(r)); return true; }
+    default:
+        return false; 
+    }
+}
+
 static void lcd_draw_char_block(uint16_t x, uint16_t y, char c, uint16_t fg, uint16_t bg) {
-    (void)c;
-    lcd_fill_rect(x, y, 5, 7, bg);
-    lcd_fill_rect(x + 1, y + 1, 3, 5, fg);
+    uint8_t rows[7] = {0};
+    bool has_glyph = lcd_get_glyph_5x7(c, rows);
+
+    lcd_fill_rect(x, y, 6, 8, bg);
+    if (!has_glyph) {
+        return;
+    }
+
+    for (int ry = 0; ry < 7; ry++) {
+        for (int rx = 0; rx < 5; rx++) {
+            if (rows[ry] & (1u << (4 - rx))) {
+                lcd_draw_pixel((uint16_t)(x + rx), (uint16_t)(y + ry), fg);
+            }
+        }
+    }
 }
 
 static void lcd_draw_string_block(uint16_t x, uint16_t y, const char *s, uint16_t fg, uint16_t bg) {
