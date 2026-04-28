@@ -6,6 +6,7 @@
 #include <math.h>
 
 #include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
 #include "freertos/task.h"
 
 #include "esp_log.h"
@@ -131,6 +132,7 @@ static spi_device_handle_t g_lcddev = NULL;
 static bool g_spi_bus_ready = false;
 static bool g_stepper_ready = false;
 static int g_stepper_phase = 0;
+static QueueHandle_t g_stepper_temp_queue = NULL;
 
 static void ble_app_advertise(void);
 
@@ -169,8 +171,19 @@ static void stepper_handle_overtemp(float pan_temp_c) {
                 gpio_set_level(18, g_step_sequence[s][3]);
                 step_counter++;
                 vTaskDelay(pdMS_TO_TICKS(20));
-                printf("%d ", step_counter);
+                // printf("%d ", step_counter);
             }
+        }
+    }
+}
+
+static void stepper_task(void *param) {
+    (void)param;
+
+    float pan_temp_c = 0.0f;
+    while (1) {
+        if (xQueueReceive(g_stepper_temp_queue, &pan_temp_c, portMAX_DELAY) == pdTRUE) {
+            stepper_handle_overtemp(pan_temp_c);
         }
     }
 }
@@ -876,7 +889,9 @@ static void sensor_task(void *param) {
             g_latest_pkt = next;
             taskEXIT_CRITICAL(&g_pkt_lock);
 
-            stepper_handle_overtemp(next.thermocouple_c);
+            if (g_stepper_temp_queue != NULL) {
+                xQueueOverwrite(g_stepper_temp_queue, &next.thermocouple_c);
+            }
 
             ESP_LOGI(TAG,
                      "%" PRIu64 ",meat=%.2fC raw_adc=%" PRIu32 " raw_tc=0x%08" PRIX32 " pan=%.2fC intern=%.2fC fault=%d flags=0x%02X",
@@ -1067,7 +1082,11 @@ void app_main(void) {
     ble_svc_gap_device_name_set(DEVICE_NAME);
     ble_hs_cfg.sync_cb = ble_on_sync;
 
+    g_stepper_temp_queue = xQueueCreate(1, sizeof(float));
+    ESP_ERROR_CHECK(g_stepper_temp_queue != NULL ? ESP_OK : ESP_FAIL);
+
     xTaskCreate(sensor_task, "sensor_task", 8192, NULL, 6, NULL);
+    xTaskCreatePinnedToCore(stepper_task, "stepper_task", 4096, NULL, 5, NULL, 1);
     xTaskCreate(lcd_task, "lcd_task", 6144, NULL, 4, NULL);
     nimble_port_freertos_init(host_task);
     xTaskCreate(notify_task, "notify_task", 4096, NULL, 5, NULL);
