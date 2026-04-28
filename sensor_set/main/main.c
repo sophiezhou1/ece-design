@@ -49,6 +49,22 @@ static const int steps[4][4] = {
 
 int step_counter = 0;
 
+void step_motor(int steps_to_take, int direction) {
+    // direction: +1 = left, -1 = right
+    for (int i = 0; i < steps_to_take; i++) {
+        for (int s = 0; s < 4; s++) {
+            int idx = (direction == 1) ? s : (3 - s);
+
+            gpio_set_level(15, steps[idx][0]);
+            gpio_set_level(16, steps[idx][1]);
+            gpio_set_level(17, steps[idx][2]);
+            gpio_set_level(18, steps[idx][3]);
+
+            vTaskDelay(pdMS_TO_TICKS(20));
+        }
+    }
+}
+
 void app_main(void)
 {
     gpio_config_t io_conf = {
@@ -59,41 +75,23 @@ void app_main(void)
         .intr_type = GPIO_INTR_DISABLE
     };
     gpio_config(&io_conf);
-    step_counter = 0;
 
-    // 1800 steps for startup + 1 rotation
-    while (step_counter < 1800) {
-        for (int s = 0; s < 4; s++) {
-            gpio_set_level(15, steps[s][0]);
-            step_counter++;
-            gpio_set_level(16, steps[s][1]);
-            step_counter++;
-            gpio_set_level(17, steps[s][2]);
-            step_counter++;
-            gpio_set_level(18, steps[s][3]);
-            step_counter++;
-            vTaskDelay(pdMS_TO_TICKS(20));
-            // printf("%d      ", step_counter);
-        }
-    }
+    // --- Initial sequence ---
+    // vTaskDelay(pdMS_TO_TICKS(10000));
+    step_motor(250, 1);   // left 1000
+    printf("done 100 left\n");
+    step_motor(75, -1);   // right 300
+    printf("done 75 right\n");
 
-    printf("break");
-    step_counter = 0;
+    // --- Continuous oscillation ---
+    while (1) {
+        step_motor(125, 1);    // left 300
+        vTaskDelay(pdMS_TO_TICKS(500));  // wait
+        printf("done 20 left\n");
 
-    // 2050 for regular full rotation
-    while (step_counter < 5) {
-        for (int s = 0; s < 4; s++) {
-            gpio_set_level(15, steps[s][0]);
-            step_counter++;
-            gpio_set_level(16, steps[s][1]);
-            step_counter++;
-            gpio_set_level(17, steps[s][2]);
-            step_counter++;
-            gpio_set_level(18, steps[s][3]);
-            step_counter++;
-            vTaskDelay(pdMS_TO_TICKS(20));
-            printf("%d      ", step_counter);
-        }
+        step_motor(75, -1);   // right 300
+        vTaskDelay(pdMS_TO_TICKS(500));  // wait
+        printf("done 20 right\n");
     }
 }
 

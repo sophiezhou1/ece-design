@@ -213,7 +213,7 @@ class Pipeline:
         if self.state.properties.warn_overtemp == 1:
             fault_strings.append("OVERTEMP")
             if self.prev_overtemp != 1:
-                self._emit_tag(event_tags, "ACTION:DECREASE_KNOB_30")
+                self._emit_tag(event_tags, "ACTION:DECREASE_KNOB_125")
         self.prev_overtemp = self.state.properties.warn_overtemp
         if fault_oc == 1:
             fault_strings.append("TC_OPEN")
