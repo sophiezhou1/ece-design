@@ -249,21 +249,24 @@ class Pipeline:
             self.state.properties.var = variance
 
         fault = 1 if (pkt.control_flags & 0x01) else 0
+        probe_disconnect = 1 if (pkt.control_flags & 0x04) else 0
+        tc_disconnect = 1 if (pkt.control_flags & 0x08) else 0
         fault_oc = pkt.tc_fault_flags & 0x01
         fault_scg = (pkt.tc_fault_flags >> 1) & 0x01
         fault_scv = (pkt.tc_fault_flags >> 2) & 0x01
 
         # intern currently not transmitted over BLE; keep None-equivalent using NaN
-        flags = self.monitor.update(pkt.t_us, adc_raw_int, pkt.tc_c, math.nan,
+        internal_c_for_fault = -1.0 if tc_disconnect else math.nan
+        flags = self.monitor.update(pkt.t_us, adc_raw_int, pkt.tc_c, internal_c_for_fault,
                                     fault, fault_oc, fault_scg, fault_scv)
         fault_detection.apply_fault_flags(self.state.properties, flags)
 
         fault_strings: list[str] = []
         if adc_raw_int >= 4095 or adc_raw_int <= 0:
             fault_strings.append("THERMISTOR_ADC_RAIL")
-        if self.state.properties.fault_probe_dc == 1:
+        if probe_disconnect or self.state.properties.fault_probe_dc == 1:
             fault_strings.append("PROBE_DISCONNECT")
-        if self.state.properties.fault_tc_dc == 1:
+        if tc_disconnect or self.state.properties.fault_tc_dc == 1:
             fault_strings.append("THERMOCOUPLE_DISCONNECT")
         if self.state.properties.warn_overtemp == 1:
             fault_strings.append("OVERTEMP")
@@ -283,8 +286,8 @@ class Pipeline:
         self.state.fault_codes = [self.FAULT_CODE_MAP[name] for name in fault_strings]
 
         # ===== FSM / TIMER MODE FLOW =====
-        probe_connected = (self.state.properties.fault_probe_dc != 1)
-        tc_connected = (self.state.properties.fault_tc_dc != 1)
+        probe_connected = not (probe_disconnect or self.state.properties.fault_probe_dc == 1)
+        tc_connected = not (tc_disconnect or self.state.properties.fault_tc_dc == 1)
         want_timer_mode = (not probe_connected) or (not tc_connected)
 
         if want_timer_mode and not self.timer_mode:
