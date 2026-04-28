@@ -175,6 +175,7 @@ class Pipeline:
         self.state = TelemetryState()
         self.started = False
         self.flip_sent = False
+        self.cycle_complete = False
         self.prev_overtemp = 0
         self.timer_mode = False
         self.deadline_s: float | None = None
@@ -290,11 +291,16 @@ class Pipeline:
             self.timer_mode = True
             self.deadline_s = None
             self.deadline_label = ""
+            if not probe_connected:
+                self._emit_tag(event_tags, "SENSOR:PROBE_DISCONNECTED")
+            if not tc_connected:
+                self._emit_tag(event_tags, "SENSOR:TC_DISCONNECTED")
             self._emit_tag(event_tags, "MODE:TIMER_ON")
         elif (not want_timer_mode) and self.timer_mode:
             self.timer_mode = False
             self.deadline_s = None
             self.deadline_label = ""
+            self._emit_tag(event_tags, "SENSOR:RECONNECTED")
             self._emit_tag(event_tags, "MODE:TIMER_OFF")
 
         pan_c = tc_avg
@@ -372,8 +378,9 @@ class Pipeline:
                 self.deadline_label = ""
                 self._emit_tag(event_tags, "TIMER:REST_DONE")
 
-        if self.fsm_sys.state == fsm.State.DONE:
+        if self.fsm_sys.state == fsm.State.DONE and not self.cycle_complete:
             self._emit_tag(event_tags, "FSM:CYCLE_COMPLETE")
+            self.cycle_complete = True
 
         self.state.latest_packet = pkt
         self.state.latest_sample = sample
@@ -393,6 +400,13 @@ class Pipeline:
         self.linreg.reset()
         self.var.reset()
         self.state = TelemetryState()
+        self.started = False
+        self.flip_sent = False
+        self.cycle_complete = False
+        self.prev_overtemp = 0
+        self.timer_mode = False
+        self.deadline_s = None
+        self.deadline_label = ""
 
 
 def _candidate_matcher(name: Optional[str], address: Optional[str]):
@@ -459,10 +473,11 @@ async def main():
                 transition_tags = [t for t in state.event_tags if t.startswith("FSM_STATE:")]
                 mode_tags = [t for t in state.event_tags if t.startswith("MODE:")]
                 action_tags = [t for t in state.event_tags if t.startswith("ACTION:")]
+                sensor_tags = [t for t in state.event_tags if t.startswith("SENSOR:")]
 
                 _print_live_line(state)
 
-                if transition_tags or mode_tags or action_tags:
+                if transition_tags or mode_tags or action_tags or sensor_tags:
                     _freeze_line()
                     for tag in transition_tags:
                         print(f"  {tag.split(':', 1)[1]}")
@@ -470,6 +485,13 @@ async def main():
                         print(f"  {tag.split(':', 1)[1]}")
                     for tag in action_tags:
                         print(f"  {tag.split(':', 1)[1]}")
+                    for tag in sensor_tags:
+                        print(f"  {tag.split(':', 1)[1]}")
+
+                if pipeline.cycle_complete:
+                    _freeze_line()
+                    print("Cook cycle complete.")
+                    break
         finally:
             _freeze_line()
             await client.stop_notify(CHAR_UUID)
