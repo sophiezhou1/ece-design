@@ -3,6 +3,8 @@ import asyncio
 import math
 import struct
 import time
+import sys
+import contextlib
 from collections import deque
 from dataclasses import dataclass, asdict, field
 from typing import Optional
@@ -29,6 +31,57 @@ HISTORY_MAX = 5000
 MA_N = 10
 MED_N = 3
 
+
+def _fmt_mmss(sec: float) -> str:
+    sec_i = max(0, int(sec + 0.5))
+    m = sec_i // 60
+    s = sec_i % 60
+    return f"{m:02d}:{s:02d}"
+
+
+def _render_live_line(state: "TelemetryState") -> str:
+    if not state.latest_sample:
+        return "waiting for samples..."
+
+    pan_c = state.latest_sample.tc
+    internal_c = state.latest_sample.adc
+    faults = ",".join(state.fault_strings) if state.fault_strings else "none"
+    timer_txt = (
+        f"{state.timer_label} {_fmt_mmss(state.timer_remaining_s)}"
+        if state.timer_mode and state.timer_label
+        else ("ON" if state.timer_mode else "OFF")
+    )
+
+    return (
+        f"pan={pan_c:5.2f}C "
+        f"internal={internal_c:5.2f}C "
+        f"fsm={state.fsm_state} "
+        f"timer={timer_txt} "
+        f"faults={faults}"
+    )
+
+
+def _print_live_line(state: "TelemetryState"):
+    msg = _render_live_line(state)
+    sys.stdout.write("\r" + msg + " " * 12)
+    sys.stdout.flush()
+
+
+def _freeze_line():
+    sys.stdout.write("\n")
+    sys.stdout.flush()
+
+
+# Helper to silence FSM prints
+@contextlib.contextmanager
+def _silence_fsm_prints():
+    saved_stdout = sys.stdout
+    try:
+        with open("/dev/null", "w") as devnull:
+            sys.stdout = devnull
+            yield
+    finally:
+        sys.stdout = saved_stdout
 
 @dataclass
 class BlePacket:
@@ -126,7 +179,7 @@ class Pipeline:
         self.timer_mode = False
         self.deadline_s: float | None = None
         self.deadline_label = ""
-        self.preheat_target_c = 30.0
+        self.preheat_target_c = 35.0
         self.flip_pan_c = 40.0
         self.internal_target_c = 50.0
         self.sear_side_s = 10.0
@@ -139,7 +192,8 @@ class Pipeline:
     def _dispatch_with_tag(self, tags: list[str], event: fsm.Event, payload: dict | None = None):
         payload = payload or {}
         prev_state = self.fsm_sys.state
-        ok = self.fsm_sys.dispatch(fsm.EventMsg(event, payload))
+        with _silence_fsm_prints():
+            ok = self.fsm_sys.dispatch(fsm.EventMsg(event, payload))
         if ok:
             self._emit_tag(tags, f"FSM_EVENT:{event.name}")
             if self.fsm_sys.state != prev_state:
@@ -175,7 +229,7 @@ class Pipeline:
         event_tags: list[str] = []
         # raw probe from BLE payload -> temp conversion
         adc_raw_int = int(pkt.food_probe_raw)
-        temp = self.thermistor_conv(pkt.food_probe_raw)
+        temp = pkt.food_probe_raw
 
         sample = SensorData(pkt.t_us, temp, pkt.tc_c)
         self.history.append(sample)
@@ -319,10 +373,7 @@ class Pipeline:
                 self._emit_tag(event_tags, "TIMER:REST_DONE")
 
         if self.fsm_sys.state == fsm.State.DONE:
-            self._dispatch_with_tag(event_tags, fsm.Event.RESET)
             self._emit_tag(event_tags, "FSM:CYCLE_COMPLETE")
-            self.started = False
-            self.flip_sent = False
 
         self.state.latest_packet = pkt
         self.state.latest_sample = sample
@@ -405,18 +456,22 @@ async def main():
                     continue
                 state = pipeline.process_packet(pkt)
 
-                # predictable, stable output for downstream app integration
-                out = state.as_dict()
-                if out["latest_sample"] is not None:
-                    print(
-                        f"{out['latest_sample']['adc']:.2f} {out['latest_sample']['tc']:.2f} "
-                        f"fault={out['properties']['fault']} "
-                        f"fault_strings={out['fault_strings']} "
-                        f"fault_codes={out['fault_codes']} "
-                        f"fsm={out['fsm_state']} "
-                        f"tags={out['event_tags']}"
-                    )
+                transition_tags = [t for t in state.event_tags if t.startswith("FSM_STATE:")]
+                mode_tags = [t for t in state.event_tags if t.startswith("MODE:")]
+                action_tags = [t for t in state.event_tags if t.startswith("ACTION:")]
+
+                _print_live_line(state)
+
+                if transition_tags or mode_tags or action_tags:
+                    _freeze_line()
+                    for tag in transition_tags:
+                        print(f"  {tag.split(':', 1)[1]}")
+                    for tag in mode_tags:
+                        print(f"  {tag.split(':', 1)[1]}")
+                    for tag in action_tags:
+                        print(f"  {tag.split(':', 1)[1]}")
         finally:
+            _freeze_line()
             await client.stop_notify(CHAR_UUID)
 
 
