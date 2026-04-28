@@ -165,12 +165,14 @@ class Pipeline:
             self.state.properties.var = variance
 
         fault = 1 if (pkt.control_flags & 0x01) else 0
+        tc_disconnect = 1 if (pkt.control_flags & 0x08) else 0  
         fault_oc = pkt.tc_fault_flags & 0x01
         fault_scg = (pkt.tc_fault_flags >> 1) & 0x01
         fault_scv = (pkt.tc_fault_flags >> 2) & 0x01
 
         # intern currently not transmitted over BLE; keep None-equivalent using NaN
-        flags = self.monitor.update(pkt.t_us, adc_raw_int, pkt.tc_c, math.nan,
+        internal_c_for_fault = -1.0 if tc_disconnect else math.nan
+        flags = self.monitor.update(pkt.t_us, adc_raw_int, pkt.tc_c, internal_c_for_fault,
                                     fault, fault_oc, fault_scg, fault_scv)
         fault_detection.apply_fault_flags(self.state.properties, flags)
 
@@ -183,11 +185,11 @@ class Pipeline:
             fault_strings.append("THERMOCOUPLE_DISCONNECT")
         if self.state.properties.warn_overtemp == 1:
             fault_strings.append("OVERTEMP")
-        if fault_oc == 1:
+        if self.state.properties.fault_oc == 1:
             fault_strings.append("TC_OPEN")
-        if fault_scg == 1:
+        if self.state.properties.fault_scg == 1:
             fault_strings.append("TC_SHORT_GND")
-        if fault_scv == 1:
+        if self.state.properties.fault_scv == 1:
             fault_strings.append("TC_SHORT_VCC")
 
         # stable order + dedupe
