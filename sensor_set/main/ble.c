@@ -56,6 +56,14 @@ static const char *TAG = "sensor_ble";
 
 #define ADC_INPUT_GPIO          4
 
+#define STEPPER_PHASE_DELAY_MS          4
+#define STEPPER_ACTIVATE_STEPS          100
+#define STEPPER_TRIM_LEFT_STEPS         100
+#define STEPPER_SHUTOFF_LEFT_STEPS      3000
+#define OVERTEMP_TRIM_DELAY_MS          8000
+#define OVERTEMP_SHUTOFF_DELAY_MS       30000
+#define OVERTEMP_MIN_DROP_C             2.0f
+
 #define COLOR_BLACK             0x0000
 #define COLOR_WHITE             0xFFFF
 #define COLOR_RED               0xF800
@@ -103,12 +111,69 @@ static uint8_t g_own_addr_type = BLE_OWN_ADDR_PUBLIC;
 static portMUX_TYPE g_pkt_lock = portMUX_INITIALIZER_UNLOCKED;
 static sensor_packet_t g_latest_pkt = {0};
 
+static const gpio_num_t g_stepper_pins[4] = {
+    GPIO_NUM_15,
+    GPIO_NUM_16,
+    GPIO_NUM_17,
+    GPIO_NUM_18,
+};
+
+static const uint8_t g_step_sequence[4][4] = {
+    {1, 0, 0, 0},
+    {0, 1, 0, 0},
+    {0, 0, 1, 0},
+    {0, 0, 0, 1},
+};
+
 /* SPI devices */
 static spi_device_handle_t g_maxdev = NULL;
 static spi_device_handle_t g_lcddev = NULL;
 static bool g_spi_bus_ready = false;
+static bool g_stepper_ready = false;
+static int g_stepper_phase = 0;
 
 static void ble_app_advertise(void);
+
+static void stepper_init_once(void) {
+    if (g_stepper_ready) {
+        return;
+    }
+
+    gpio_config_t io_conf = {
+        .pin_bit_mask = (1ULL << 15) | (1ULL << 16) | (1ULL << 17) | (1ULL << 18),
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE
+    };
+    ESP_ERROR_CHECK(gpio_config(&io_conf));
+    for (int p = 0; p < 4; p++) {
+        gpio_set_level(g_stepper_pins[p], g_step_sequence[g_stepper_phase][p]);
+    }
+    g_stepper_ready = true;
+}
+
+static void stepper_handle_overtemp(float pan_temp_c) {
+    bool overtemp = pan_temp_c > PAN_MAX_TEMP_C;
+    int step_counter = 0;
+    if (overtemp) {
+        stepper_init_once();
+        while (step_counter < 1000) {
+            for (int s = 0; s < 4; s++) {
+                gpio_set_level(15, g_step_sequence[s][0]);
+                step_counter++;
+                gpio_set_level(16, g_step_sequence[s][1]);
+                step_counter++;
+                gpio_set_level(17, g_step_sequence[s][2]);
+                step_counter++;
+                gpio_set_level(18, g_step_sequence[s][3]);
+                step_counter++;
+                vTaskDelay(pdMS_TO_TICKS(20));
+                printf("%d ", step_counter);
+            }
+        }
+    }
+}
 
 /* --------------------------- LCD helpers --------------------------- */
 
@@ -810,6 +875,8 @@ static void sensor_task(void *param) {
             taskENTER_CRITICAL(&g_pkt_lock);
             g_latest_pkt = next;
             taskEXIT_CRITICAL(&g_pkt_lock);
+
+            stepper_handle_overtemp(next.thermocouple_c);
 
             ESP_LOGI(TAG,
                      "%" PRIu64 ",meat=%.2fC raw_adc=%" PRIu32 " raw_tc=0x%08" PRIX32 " pan=%.2fC intern=%.2fC fault=%d flags=0x%02X",
