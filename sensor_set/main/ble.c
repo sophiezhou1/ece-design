@@ -47,23 +47,23 @@ static const char *TAG = "sensor_ble";
 #define PIN_MAX_CS              9
 
 /* LCD */
-#define PIN_LCD_CS              16
+#define PIN_LCD_CS              46
 #define PIN_LCD_DC              7
 #define PIN_LCD_RST             6
 #define PIN_LCD_BL              21
 #define LCD_W                   320
 #define LCD_H                   240
-#define PAN_MAX_TEMP_C          35.0f
+#define PAN_MAX_TEMP_C          110.0f
+#define PAN_UNSAFE_TEMP_C       130.0f
+#define PAN_MIN_TEMP_C          95.0f
 
 #define ADC_INPUT_GPIO          4
 
-#define STEPPER_PHASE_DELAY_MS          4
-#define STEPPER_ACTIVATE_STEPS          100
-#define STEPPER_TRIM_LEFT_STEPS         100
-#define STEPPER_SHUTOFF_LEFT_STEPS      3000
-#define OVERTEMP_TRIM_DELAY_MS          8000
-#define OVERTEMP_SHUTOFF_DELAY_MS       30000
-#define OVERTEMP_MIN_DROP_C             2.0f
+#define STEPPER_PHASE_DELAY_MS          20
+#define STEPPER_STARTUP_LEFT_STEPS      250
+#define STEPPER_TRIM_LEFT_STEPS         125
+#define STEPPER_TRIM_RIGHT_STEPS        75
+#define STEPPER_SHUTOFF_LEFT_STEPS      300
 
 #define COLOR_BLACK             0x0000
 #define COLOR_WHITE             0xFFFF
@@ -136,6 +136,12 @@ static QueueHandle_t g_stepper_temp_queue = NULL;
 
 static void ble_app_advertise(void);
 
+typedef enum {
+    KNOB_POWER_1 = 1,
+    KNOB_POWER_3 = 3,
+    KNOB_DISABLED,
+} knob_power_state_t;
+
 static void stepper_init_once(void) {
     if (g_stepper_ready) {
         return;
@@ -155,24 +161,20 @@ static void stepper_init_once(void) {
     g_stepper_ready = true;
 }
 
-static void stepper_handle_overtemp(float pan_temp_c) {
-    bool overtemp = pan_temp_c > PAN_MAX_TEMP_C;
-    int step_counter = 0;
-    if (overtemp) {
-        stepper_init_once();
-        while (step_counter < 1000) {
-            for (int s = 0; s < 4; s++) {
-                gpio_set_level(15, g_step_sequence[s][0]);
-                step_counter++;
-                gpio_set_level(16, g_step_sequence[s][1]);
-                step_counter++;
-                gpio_set_level(17, g_step_sequence[s][2]);
-                step_counter++;
-                gpio_set_level(18, g_step_sequence[s][3]);
-                step_counter++;
-                vTaskDelay(pdMS_TO_TICKS(20));
-                // printf("%d ", step_counter);
-            }
+static void step_motor(int steps_to_take, int direction) {
+    // direction: +1 = left, -1 = right
+    stepper_init_once();
+    for (int i = 0; i < steps_to_take; i++) {
+        for (int s = 0; s < 4; s++) {
+            int idx = (direction == 1) ? s : (3 - s);
+
+            gpio_set_level(15, g_step_sequence[idx][0]);
+            gpio_set_level(16, g_step_sequence[idx][1]);
+            gpio_set_level(17, g_step_sequence[idx][2]);
+            gpio_set_level(18, g_step_sequence[idx][3]);
+
+            g_stepper_phase = idx;
+            vTaskDelay(pdMS_TO_TICKS(STEPPER_PHASE_DELAY_MS));
         }
     }
 }
@@ -181,9 +183,46 @@ static void stepper_task(void *param) {
     (void)param;
 
     float pan_temp_c = 0.0f;
+    knob_power_state_t power_state = KNOB_POWER_3;
+
+    ESP_LOGI(TAG, "Startup: turning left %d steps to power 1", STEPPER_STARTUP_LEFT_STEPS);
+    step_motor(STEPPER_STARTUP_LEFT_STEPS, 1);
+    power_state = KNOB_POWER_1;
+
+    ESP_LOGI(TAG, "Startup: turning right %d steps to power 3", STEPPER_TRIM_RIGHT_STEPS);
+    step_motor(STEPPER_TRIM_RIGHT_STEPS, -1);
+    power_state = KNOB_POWER_3;
+
     while (1) {
-        if (xQueueReceive(g_stepper_temp_queue, &pan_temp_c, portMAX_DELAY) == pdTRUE) {
-            stepper_handle_overtemp(pan_temp_c);
+        if (xQueueReceive(g_stepper_temp_queue, &pan_temp_c, portMAX_DELAY) != pdTRUE ||
+            pan_temp_c <= 0.0f) {
+            continue;
+        }
+
+        if (power_state == KNOB_DISABLED) {
+            continue;
+        }
+
+        if (pan_temp_c >= PAN_UNSAFE_TEMP_C) {
+            ESP_LOGE(TAG, "Unsafe pan temperature %.2fC reached; shutting down", pan_temp_c);
+            step_motor(STEPPER_SHUTOFF_LEFT_STEPS, 1);
+            power_state = KNOB_DISABLED;
+            continue;
+        }
+
+        if (pan_temp_c > PAN_MAX_TEMP_C && power_state == KNOB_POWER_3) {
+            ESP_LOGW(TAG, "Overtemp %.2fC: turning left %d steps to power 1",
+                     pan_temp_c, STEPPER_TRIM_LEFT_STEPS);
+            step_motor(STEPPER_TRIM_LEFT_STEPS, 1);
+            power_state = KNOB_POWER_1;
+            continue;
+        }
+
+        if (pan_temp_c < PAN_MIN_TEMP_C && power_state == KNOB_POWER_1) {
+            ESP_LOGW(TAG, "Undertemp %.2fC: turning right %d steps to power 3",
+                     pan_temp_c, STEPPER_TRIM_RIGHT_STEPS);
+            step_motor(STEPPER_TRIM_RIGHT_STEPS, -1);
+            power_state = KNOB_POWER_3;
         }
     }
 }

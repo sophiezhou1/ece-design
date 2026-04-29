@@ -180,7 +180,7 @@ class Pipeline:
         self.timer_mode = False
         self.deadline_s: float | None = None
         self.deadline_label = ""
-        self.preheat_target_c = 35.0
+        self.preheat_target_c = 200.0
         self.flip_pan_c = 40.0
         self.internal_target_c = 50.0
         self.sear_side_s = 10.0
