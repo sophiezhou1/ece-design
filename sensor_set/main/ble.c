@@ -56,6 +56,7 @@ static const char *TAG = "sensor_ble";
 #define PAN_MAX_TEMP_C          110.0f
 #define PAN_UNSAFE_TEMP_C       130.0f
 #define PAN_MIN_TEMP_C          95.0f
+#define PAN_TEMP_MA_N           10
 
 #define ADC_INPUT_GPIO          4
 
@@ -387,6 +388,7 @@ static void lcd_draw_number_1dp(int x, int y, int scale, float value, uint16_t c
     int tenths   = v10 % 10;
 
     int dx = 22 * scale;
+    lcd_fill_rect(x, y, 4 * dx, 32 * scale, bg);
 
     if (hundreds > 0) {
         lcd_draw_digit7(x, y, scale, hundreds, color, bg);
@@ -838,6 +840,32 @@ static float thermistor_conv(float raw) {
     return temp_k - 273.15f;
 }
 
+typedef struct {
+    float buf[PAN_TEMP_MA_N];
+    float sum;
+    size_t idx;
+    size_t count;
+} moving_average_t;
+
+static void moving_average_reset(moving_average_t *ma) {
+    memset(ma, 0, sizeof(*ma));
+}
+
+static float moving_average_update(moving_average_t *ma, float value) {
+    if (ma->count < PAN_TEMP_MA_N) {
+        ma->buf[ma->idx] = value;
+        ma->sum += value;
+        ma->count++;
+    } else {
+        ma->sum -= ma->buf[ma->idx];
+        ma->buf[ma->idx] = value;
+        ma->sum += value;
+    }
+
+    ma->idx = (ma->idx + 1) % PAN_TEMP_MA_N;
+    return ma->sum / (float)ma->count;
+}
+
 
 static void sensor_task(void *param) {
     (void)param;
@@ -877,6 +905,8 @@ static void sensor_task(void *param) {
     static adc_continuous_data_t parsed_data[1024 / SOC_ADC_DIGI_RESULT_BYTES];
     const uint32_t DECIM_N = 20;
     uint32_t decim = 0;
+    moving_average_t pan_temp_ma = {0};
+    bool pan_temp_ma_valid = false;
 
     while (1) {
         uint32_t ret_num = 0;
@@ -903,18 +933,29 @@ static void sensor_task(void *param) {
         float tc = max31855_tctemp_fault(raw_tc, &tc_fault);
         float tc_internal = max31855_internal(raw_tc);
         uint8_t tc_fault_flags = (uint8_t)(raw_tc & 0x07u);
+        bool tc_disconnected = ((tc_fault_flags & 0x01u) != 0) || (tc <= 0.0f);
+        float pan_temp_c = tc;
+
+        if (tc_disconnected) {
+            if (pan_temp_ma_valid) {
+                moving_average_reset(&pan_temp_ma);
+                pan_temp_ma_valid = false;
+            }
+        } else {
+            pan_temp_c = moving_average_update(&pan_temp_ma, tc);
+            pan_temp_ma_valid = true;
+        }
 
         for (uint32_t i = 0; i < num_parsed_samples; i++) {
             if (!parsed_data[i].valid) continue;
             if ((++decim % DECIM_N) != 0) continue;
 
             bool probe_disconnected = (parsed_data[i].raw_data >= 4095u);
-            bool tc_disconnected = ((tc_fault_flags & 0x01u) != 0) || (tc <= 0.0f);
 
             sensor_packet_t next = {
                 .seq = 0,
                 .timestamp_us = (uint64_t)esp_timer_get_time(),
-                .thermocouple_c = tc,
+                .thermocouple_c = pan_temp_c,
                 .food_probe_c = thermistor_conv((float)parsed_data[i].raw_data),
                 .control_flags = (uint8_t)((tc_fault ? CTRL_FLAG_TC_FAULT : 0u) |
                             CTRL_FLAG_SAMPLE_VALID |
@@ -933,8 +974,8 @@ static void sensor_task(void *param) {
             }
 
             ESP_LOGI(TAG,
-                     "%" PRIu64 ",meat=%.2fC raw_adc=%" PRIu32 " raw_tc=0x%08" PRIX32 " pan=%.2fC intern=%.2fC fault=%d flags=0x%02X",
-                     next.timestamp_us, next.food_probe_c, parsed_data[i].raw_data, raw_tc, tc, tc_internal, tc_fault, tc_fault_flags);
+                     "%" PRIu64 ",meat=%.2fC raw_adc=%" PRIu32 " raw_tc=0x%08" PRIX32 " pan=%.2fC pan_raw=%.2fC intern=%.2fC fault=%d flags=0x%02X",
+                     next.timestamp_us, next.food_probe_c, parsed_data[i].raw_data, raw_tc, pan_temp_c, tc, tc_internal, tc_fault, tc_fault_flags);
         }
 
         vTaskDelay(pdMS_TO_TICKS(1));
